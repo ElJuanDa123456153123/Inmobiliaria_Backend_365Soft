@@ -1,21 +1,33 @@
-🏠 Plataforma Inmobiliaria — Backend
+# 🏠 Plataforma Inmobiliaria — Backend
+
 Backend de la plataforma inmobiliaria boliviana con publicación vía WhatsApp, CRM integrado, mapa interactivo y gestión de suscripciones.
 
-🚀 Stack Tecnológico
-CapaTecnologíaLenguajeGo 1.22+FrameworkFiber v2Base de datosPostgreSQL 15+ con PostGISCaché / EstadoRedis 7+ChatbotEvolution API + n8n + Gemini FlashFotosCloudflare R2 (compatible S3)PagosQR boliviano + WompiContenedoresDocker + Docker Compose
+## 🚀 Stack Tecnológico
 
-📋 Requisitos Previos
+| Capa | Tecnología |
+|------|------------|
+| Lenguaje | Go 1.22+ |
+| Framework | Fiber v2 |
+| Base de datos | PostgreSQL 15+ con PostGIS |
+| Caché / Estado | Redis 7+ |
+| Chatbot | Evolution API + n8n + Gemini Flash |
+| Fotos | Cloudflare R2 (compatible S3) |
+| Pagos | QR boliviano + Wompi |
+| Contenedores | Docker + Docker Compose |
 
-Go 1.22+
-PostgreSQL 15+ con extensión PostGIS
-Redis 7+
-Docker y Docker Compose
-Cuenta en Cloudflare R2
-Cuenta en Wompi (opcional para pagos automáticos)
+## 📋 Requisitos Previos
 
+- **Go** 1.22+
+- **PostgreSQL** 15+ con extensión PostGIS
+- **Redis** 7+
+- **Docker** y **Docker Compose**
+- Cuenta en Cloudflare R2
+- Cuenta en Wompi (opcional para pagos automáticos)
 
-🔧 Instalación
-bash# Clonar el repositorio
+## 🔧 Instalación
+
+```bash
+# Clonar el repositorio
 git clone https://github.com/tu-usuario/inmobiliaria-backend.git
 cd inmobiliaria-backend
 
@@ -26,9 +38,12 @@ go mod tidy
 cp .env.example .env
 
 # Editar .env con tus credenciales
+```
 
-⚙️ Variables de Entorno
-env# Servidor
+## ⚙️ Variables de Entorno
+
+```env
+# Servidor
 PORT=8080
 APP_ENV=development
 
@@ -57,9 +72,12 @@ WOMPI_PRIVATE_KEY=...
 
 # Gemini Flash
 GEMINI_API_KEY=...
+```
 
-🗄️ Configurar Base de Datos
-bash# Levantar PostgreSQL con PostGIS via Docker
+## 🗄️ Configurar Base de Datos
+
+```bash
+# Levantar PostgreSQL con PostGIS via Docker
 docker-compose up -d postgres redis
 
 # Ejecutar migraciones
@@ -67,33 +85,57 @@ go run ./cmd/migrate/main.go up
 
 # Seed de datos de prueba
 go run ./cmd/seed/main.go
-🔑 Credenciales de Prueba (después del seed)
-EmailPasswordRoladmin@inmobiliaria.bosuperadminADMINagente@inmobiliaria.boagente123AGENTE
+```
 
-🎯 Modos de Ejecución
-Desarrollo
-bashgo run ./cmd/api/main.go
+### 🔑 Credenciales de Prueba (después del seed)
+
+| Email | Password | Rol |
+|-------|----------|-----|
+| admin@inmobiliaria.bo | superadmin | ADMIN |
+| agente@inmobiliaria.bo | agente123 | AGENTE |
+
+## 🎯 Modos de Ejecución
+
+### Desarrollo
+
+```bash
+go run ./cmd/api/main.go
 # Servidor en http://localhost:8080
-Con hot reload (Air)
-bash# Instalar Air
+```
+
+### Con hot reload (Air)
+
+```bash
+# Instalar Air
 go install github.com/air-verse/air@latest
 
 # Ejecutar
 air
-Producción
-bash# Build
+```
+
+### Producción
+
+```bash
+# Build
 go build -o bin/api ./cmd/api/main.go
 
 # Start
 ./bin/api
-Docker Compose (recomendado)
-bash# Levantar todos los servicios
+```
+
+### Docker Compose (recomendado)
+
+```bash
+# Levantar todos los servicios
 docker-compose up -d
 
 # Ver logs
 docker-compose logs -f api
+```
 
-📁 Estructura del Proyecto
+## 📁 Estructura del Proyecto
+
+```
 .
 ├── cmd/
 │   ├── api/           # Entry point del servidor
@@ -119,49 +161,84 @@ docker-compose logs -f api
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
+```
 
-🔌 API Endpoints
-Autenticación
-POST   /api/auth/register       Registro de usuario
-POST   /api/auth/login          Inicio de sesión
-GET    /api/auth/me             Usuario actual
-Propiedades
-GET    /api/propiedades         Listar con filtros
-GET    /api/propiedades/:id     Detalle de propiedad
-POST   /api/propiedades         Crear propiedad (autenticado)
-PUT    /api/propiedades/:id     Editar propiedad
-DELETE /api/propiedades/:id     Eliminar propiedad
-Búsqueda
-GET    /api/busqueda            Búsqueda con filtros avanzados
-GET    /api/busqueda/mapa       Propiedades para mapa (GeoJSON)
-Chatbot / WhatsApp
-POST   /api/chatbot/webhook     Webhook de Evolution API
-POST   /api/chatbot/estado      Actualizar estado de conversación
-Favoritos
-POST   /api/favoritos/:id       Guardar favorito
-DELETE /api/favoritos/:id       Quitar favorito
-GET    /api/favoritos           Mis favoritos
-Pagos
-POST   /api/pagos/qr            Generar QR de pago
-POST   /api/pagos/webhook       Webhook de confirmación Wompi
-GET    /api/pagos/historial     Historial de pagos
-Admin
-GET    /api/admin/dashboard         Métricas generales
-GET    /api/admin/propiedades       Cola de revisión
-PUT    /api/admin/propiedades/:id   Aprobar / rechazar / pausar
-GET    /api/admin/usuarios          Gestión de usuarios
-GET    /api/admin/suscripciones     Historial de suscripciones
+## 🔌 API Endpoints
 
-📁 Scripts Disponibles
-bashgo run ./cmd/api/main.go          # Servidor desarrollo
+### Autenticación
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/auth/register` | Registro de usuario |
+| POST | `/api/auth/login` | Inicio de sesión |
+| GET | `/api/auth/me` | Usuario actual |
+
+### Propiedades
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/api/propiedades` | Listar con filtros |
+| GET | `/api/propiedades/:id` | Detalle de propiedad |
+| POST | `/api/propiedades` | Crear propiedad (autenticado) |
+| PUT | `/api/propiedades/:id` | Editar propiedad |
+| DELETE | `/api/propiedades/:id` | Eliminar propiedad |
+
+### Búsqueda
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/api/busqueda` | Búsqueda con filtros avanzados |
+| GET | `/api/busqueda/mapa` | Propiedades para mapa (GeoJSON) |
+
+### Chatbot / WhatsApp
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/chatbot/webhook` | Webhook de Evolution API |
+| POST | `/api/chatbot/estado` | Actualizar estado de conversación |
+
+### Favoritos
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/favoritos/:id` | Guardar favorito |
+| DELETE | `/api/favoritos/:id` | Quitar favorito |
+| GET | `/api/favoritos` | Mis favoritos |
+
+### Pagos
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/pagos/qr` | Generar QR de pago |
+| POST | `/api/pagos/webhook` | Webhook de confirmación Wompi |
+| GET | `/api/pagos/historial` | Historial de pagos |
+
+### Admin
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/api/admin/dashboard` | Métricas generales |
+| GET | `/api/admin/propiedades` | Cola de revisión |
+| PUT | `/api/admin/propiedades/:id` | Aprobar / rechazar / pausar |
+| GET | `/api/admin/usuarios` | Gestión de usuarios |
+| GET | `/api/admin/suscripciones` | Historial de suscripciones |
+
+## 📁 Scripts Disponibles
+
+```bash
+go run ./cmd/api/main.go          # Servidor desarrollo
 go run ./cmd/migrate/main.go up   # Ejecutar migraciones
 go run ./cmd/migrate/main.go down # Revertir última migración
 go run ./cmd/seed/main.go         # Cargar datos de prueba
 go build -o bin/api ./cmd/api     # Compilar para producción
 go test ./...                     # Ejecutar tests
+```
 
-🚀 Deploy en Contabo VPS con Docker
-Arquitectura en el servidor
+## 🚀 Deploy en Contabo VPS con Docker
+
+### Arquitectura en el servidor
+
+```
 Contabo VPS (Cloud VPS 20 — 6 vCPU / 12 GB RAM recomendado)
 └── Docker Compose
     ├── nginx          ← Reverse proxy + SSL (puerto 80/443)
@@ -171,8 +248,12 @@ Contabo VPS (Cloud VPS 20 — 6 vCPU / 12 GB RAM recomendado)
     ├── evolution-api  ← WhatsApp (puerto 8081)
     ├── n8n            ← Automatizaciones (puerto 5678)
     └── chatwoot       ← Bandeja de mensajes (puerto 3000)
-Pasos de deploy
-bash# 1. Conectarse al VPS
+```
+
+### Pasos de deploy
+
+```bash
+# 1. Conectarse al VPS
 ssh root@IP_DE_CONTABO
 
 # 2. Instalar Docker y Docker Compose
@@ -196,8 +277,12 @@ docker-compose exec api go run ./cmd/migrate/main.go up
 # 7. Ver que todo esté corriendo
 docker-compose ps
 docker-compose logs -f api
-Configurar SSL con Let's Encrypt
-bash# Instalar Certbot
+```
+
+### Configurar SSL con Let's Encrypt
+
+```bash
+# Instalar Certbot
 apt install -y certbot python3-certbot-nginx
 
 # Generar certificado
@@ -205,8 +290,12 @@ certbot --nginx -d api.tudominio.com
 
 # Renovación automática (ya se configura sola)
 certbot renew --dry-run
-Actualizar en producción
-bash# Traer últimos cambios
+```
+
+### Actualizar en producción
+
+```bash
+# Traer últimos cambios
 git pull origin main
 
 # Rebuildar y reiniciar solo el servicio api
@@ -214,19 +303,22 @@ docker-compose -f docker-compose.prod.yml up -d --build api
 
 # Ver logs en tiempo real
 docker-compose logs -f api
+```
 
-📚 Recursos
+## 📚 Recursos
 
-Go
-Fiber
-PostgreSQL
-PostGIS
-Redis
-Evolution API
-Cloudflare R2
+- [Go](https://go.dev/)
+- [Fiber](https://gofiber.io/)
+- [PostgreSQL](https://www.postgresql.org/)
+- [PostGIS](https://postgis.net/)
+- [Redis](https://redis.io/)
+- [Evolution API](https://doc.evolution-api.com/)
+- [Cloudflare R2](https://www.cloudflare.com/products/r2/)
 
+## 👨‍💻 Autor
 
-👨‍💻 Autor
-Tu nombre / equipo
-📄 Licencia
+**Tu nombre / equipo**
+
+## 📄 Licencia
+
 MIT
