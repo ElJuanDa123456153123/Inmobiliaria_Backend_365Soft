@@ -24,336 +24,30 @@ Backend de la plataforma inmobiliaria boliviana con publicación vía WhatsApp, 
 - Cuenta en Cloudflare R2
 - Cuenta en Wompi (opcional para pagos automáticos)
 
-## 🆕 Guía de Instalación desde Cero (Sin Plantillas)
-
-Si quieres crear el proyecto desde cero sin usar plantillas, sigue estos pasos basados en la documentación oficial de cada tecnología.
-
-### 1. Instalar Go
-
-**Documentación oficial:** https://go.dev/doc/install
-
-**Windows:**
-```bash
-# Descargar instalador desde https://go.dev/dl/
-# O usar Chocolatey
-choco install golang
-
-# Verificar instalación
-go version  # debe ser go1.22+
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-# Descargar Go 1.22+
-wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
-
-# Extraer e instalar
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz
-
-# Agregar al PATH (agregar a ~/.bashrc o ~/.zshrc)
-export PATH=$PATH:/usr/local/go/bin
-export GOPATH=$HOME/go
-export PATH=$PATH:$GOPATH/bin
-
-# Recargar shell
-source ~/.bashrc  # o source ~/.zshrc
-
-# Verificar instalación
-go version
-```
-
-**macOS:**
-```bash
-# Usar Homebrew
-brew install go
-
-# Verificar instalación
-go version
-```
-
-### 2. Crear proyecto Go con Fiber
-
-**Documentación oficial Fiber:** https://docs.gofiber.io/
-
-**Documentación oficial Go Modules:** https://go.dev/doc/modules/manage-code
+## 🔧 Crear desde Cero
 
 ```bash
-# Crear carpeta del proyecto
+# 1. Instalar Go 1.26+
+# Descargar desde https://go.dev/dl/
+
+# 2. Crear proyecto
 mkdir inmobiliaria-backend
 cd inmobiliaria-backend
-
-# Inicializar módulo Go
 go mod init github.com/365Soft-Bolivia/inmobiliaria-backend
 
-# Instalar Fiber v2
+# 3. Instalar Fiber
 go get github.com/gofiber/fiber/v2
 
-# Instalar dependencias adicionales
-go get github.com/gofiber/fiber/v2/middleware/cors
-go get github.com/gofiber/fiber/v2/middleware/logger
-go get github.com/gofiber/fiber/v2/middleware/recover
-go get github.com/gofiber/fiber/v2/middleware/limiter
-```
+# 4. Crear estructura
+mkdir -p cmd/api internal/{shared/{config,middleware,utils},database}
 
-**Estructura mínima de carpetas:**
-```bash
-mkdir -p cmd/api internal/{modules,shared}
-mkdir -p internal/shared/{config,middleware,utils}
-mkdir -p internal/database/{migrations,models}
-```
+# 5. Crear main.go en cmd/api/
 
-**Archivo `cmd/api/main.go`:**
-```go
-package main
-
-import (
-    "log"
-    "github.com/gofiber/fiber/v2"
-    "github.com/gofiber/fiber/v2/middleware/logger"
-    "github.com/gofiber/fiber/v2/middleware/recover"
-)
-
-func main() {
-    app := fiber.New(fiber.Config{
-        AppName: "Inmobiliaria API v1.0",
-    })
-
-    // Middleware
-    app.Use(logger.New())
-    app.Use(recover.New())
-
-    // Rutas básicas
-    app.Get("/health", func(c *fiber.Ctx) error {
-        return c.JSON(fiber.Map{
-            "status": "ok",
-            "message": "API is running",
-        })
-    })
-
-    // Iniciar servidor
-    log.Fatal(app.Listen(":8080"))
-}
-```
-
-**Probar el servidor:**
-```bash
+# 6. Iniciar
 go run cmd/api/main.go
-
-# En otra terminal, probar:
-curl http://localhost:8080/health
 ```
 
-### 3. Configurar PostgreSQL con PostGIS
-
-**Documentación oficial PostgreSQL:** https://www.postgresql.org/docs/
-
-**Documentación oficial PostGIS:** https://postgis.net/documentation/
-
-**Opción A: Instalar localmente**
-```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install postgresql-15 postgresql-15-postgis-3 postgresql-client-15
-
-# Iniciar servicio
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-
-# Crear base de datos y usuario
-sudo -u postgres psql
-
-# Dentro de psql:
-CREATE DATABASE inmobiliaria;
-CREATE USER inmobiliaria_user WITH PASSWORD 'tu_password';
-GRANT ALL PRIVILEGES ON DATABASE inmobiliaria TO inmobiliaria_user;
-\c inmobiliaria
-CREATE EXTENSION postgis;
-\q
-```
-
-**Opción B: Usar Docker (Recomendado)**
-```bash
-# Crear docker-compose.yml para desarrollo
-cat > docker-compose.yml << 'EOF'
-version: '3.8'
-services:
-  postgres:
-    image: postgis/postgis:15-3.3
-    container_name: inmobiliaria-postgres
-    environment:
-      POSTGRES_USER: inmobiliaria_user
-      POSTGRES_PASSWORD: tu_password
-      POSTGRES_DB: inmobiliaria
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    container_name: inmobiliaria-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-
-volumes:
-  postgres-data:
-  redis-data:
-EOF
-
-# Iniciar servicios
-docker-compose up -d
-
-# Verificar que están corriendo
-docker-compose ps
-```
-
-### 4. Instalar driver de PostgreSQL para Go
-
-```bash
-# Docs: https://github.com/lib/pq
-go get github.com/lib/pq
-
-# Para consultas más fáciles (opcional pero recomendado)
-go get github.com/jmoiron/sqlx
-```
-
-**Ejemplo de conexión:**
-```go
-// internal/shared/config/database.go
-package config
-
-import (
-    "database/sql"
-    "fmt"
-    _ "github.com/lib/pq"
-)
-
-func ConnectDB() (*sql.DB, error) {
-    connStr := "postgres://inmobiliaria_user:tu_password@localhost:5432/inmobiliaria?sslmode=disable"
-
-    db, err := sql.Open("postgres", connStr)
-    if err != nil {
-        return nil, err
-    }
-
-    if err = db.Ping(); err != nil {
-        return nil, err
-    }
-
-    fmt.Println("Conectado a PostgreSQL")
-    return db, nil
-}
-```
-
-### 5. Instalar dependencias adicionales
-
-**JWT (Autenticación):**
-```bash
-# Docs: https://github.com/golang-jwt/jwt
-go get github.com/golang-jwt/jwt/v5
-```
-
-**Dotenv (Variables de entorno):**
-```bash
-# Docs: https://github.com/joho/godotenv
-go get github.com/joho/godotenv
-```
-
-**Validación:**
-```bash
-# Docs: https://github.com/go-playground/validator
-go get github.com/go-playground/validator/v10
-```
-
-**UUID:**
-```bash
-# Docs: https://github.com/google/uuid
-go get github.com/google/uuid
-```
-
-**Cliente HTTP:**
-```bash
-# Docs: https://github.com/imroc/req
-go get github.com/imroc/req/v3
-```
-
-**Librería para QR:**
-```bash
-# Docs: https://github.com/skip2/go-qrcode
-go get github.com/skip2/go-qrcode
-```
-
-### 6. Configurar Air (Hot Reload)
-
-**Documentación oficial:** https://github.com/air-verse/air
-
-```bash
-# Instalar Air
-go install github.com/air-verse/air@latest
-
-# Crear configuración .air.toml
-cat > .air.toml << 'EOF'
-root = "."
-tmp_dir = "tmp"
-
-[build]
-  cmd = "go build -o ./tmp/main ./cmd/api"
-  bin = "tmp/main"
-  include_ext = ["go", "tpl", "tmpl", "html"]
-  exclude_dir = ["tmp", "vendor"]
-  include_dir = []
-  exclude_file = []
-  exclude_regex = ["_test.go"]
-  exclude_unchanged = false
-  follow_symlink = false
-  full_bin = ""
-  args_bin = []
-EOF
-
-# Ejecutar con hot reload
-air
-```
-
-### 7. Probar la instalación completa
-
-```bash
-# Asegurarse de que PostgreSQL y Redis estén corriendo
-docker-compose ps
-
-# Ejecutar el proyecto
-go run cmd/api/main.go
-
-# O con hot reload
-air
-
-# Probar endpoint
-curl http://localhost:8080/health
-```
-
-### 8. Crear archivo .env.example
-
-```bash
-# Crear archivo de ejemplo
-cat > .env.example << 'EOF'
-# Servidor
-PORT=8080
-APP_ENV=development
-
-# Base de datos
-DATABASE_URL=postgres://inmobiliaria_user:tu_password@localhost:5432/inmobiliaria?sslmode=disable
-
-# Redis
-REDIS_URL=redis://localhost:6379
-
-# JWT
-JWT_SECRET=tu_secreto_super_seguro
-EOF
-```
-
-## 🔧 Instalación (Desde Repositorio)
+## 📥 Instalación desde Repositorio
 
 ```bash
 # Clonar el repositorio
@@ -373,7 +67,7 @@ cp .env.example .env
 
 ```env
 # Servidor
-PORT=8080
+PORT=3001
 APP_ENV=development
 
 # Base de datos
@@ -429,7 +123,7 @@ go run ./cmd/seed/main.go
 
 ```bash
 go run ./cmd/api/main.go
-# Servidor en http://localhost:8080
+# Servidor en http://localhost:3001
 ```
 
 ### Con hot reload (Air)
@@ -460,6 +154,56 @@ docker-compose up -d
 
 # Ver logs
 docker-compose logs -f api
+```
+
+## 🐳 Docker (Desarrollo Completo)
+
+**Requiere Docker y Docker Compose instalados.**
+
+```bash
+# Desde la carpeta principal del proyecto
+cd ..
+
+# Levantar todos los servicios (Frontend + Backend + PostgreSQL + Redis)
+docker-compose up --build
+
+# Detener servicios
+docker-compose down
+
+# Ver logs
+docker-compose logs -f backend
+```
+
+**Servicios disponibles:**
+- Frontend: http://localhost:3000
+- Backend: http://localhost:3001
+- PostgreSQL: localhost:5432
+- Redis: localhost:6379
+
+## 🧪 Probar la Instalación
+
+```bash
+# 1. Backend - Probar endpoint de salud
+curl http://localhost:3001/health
+# Respuesta esperada: {"status":"ok","message":"API is running"}
+
+# 2. Backend - Probar API
+curl http://localhost:3001/api
+# Respuesta esperada: {"message":"Bienvenido a la API de Inmobiliaria Bolivia"}
+
+# 3. Verificar PostgreSQL (Docker)
+docker exec -it inmobiliaria-postgres psql -U inmobiliaria_user -d inmobiliaria
+# Comandos útiles:
+# \dt (lista tablas)
+# \q (salir)
+
+# 4. Verificar Redis (Docker)
+docker exec -it inmobiliaria-redis redis-cli ping
+# Respuesta esperada: PONG
+
+# 5. Verificar logs de contenedores
+docker-compose ps
+docker-compose logs backend
 ```
 
 ## 📁 Estructura del Proyecto
@@ -571,7 +315,7 @@ go test ./...                     # Ejecutar tests
 Contabo VPS (Cloud VPS 20 — 6 vCPU / 12 GB RAM recomendado)
 └── Docker Compose
     ├── nginx          ← Reverse proxy + SSL (puerto 80/443)
-    ├── api            ← Go + Fiber (puerto 8080)
+    ├── api            ← Go + Fiber (puerto 3001)
     ├── postgres       ← PostgreSQL + PostGIS (puerto 5432)
     ├── redis          ← Caché + estado chatbot (puerto 6379)
     ├── evolution-api  ← WhatsApp (puerto 8081)
