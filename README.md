@@ -1,1 +1,232 @@
-# Inmobiliaria_Backend_365Soft
+🏠 Plataforma Inmobiliaria — Backend
+Backend de la plataforma inmobiliaria boliviana con publicación vía WhatsApp, CRM integrado, mapa interactivo y gestión de suscripciones.
+
+🚀 Stack Tecnológico
+CapaTecnologíaLenguajeGo 1.22+FrameworkFiber v2Base de datosPostgreSQL 15+ con PostGISCaché / EstadoRedis 7+ChatbotEvolution API + n8n + Gemini FlashFotosCloudflare R2 (compatible S3)PagosQR boliviano + WompiContenedoresDocker + Docker Compose
+
+📋 Requisitos Previos
+
+Go 1.22+
+PostgreSQL 15+ con extensión PostGIS
+Redis 7+
+Docker y Docker Compose
+Cuenta en Cloudflare R2
+Cuenta en Wompi (opcional para pagos automáticos)
+
+
+🔧 Instalación
+bash# Clonar el repositorio
+git clone https://github.com/tu-usuario/inmobiliaria-backend.git
+cd inmobiliaria-backend
+
+# Instalar dependencias de Go
+go mod tidy
+
+# Copiar variables de entorno
+cp .env.example .env
+
+# Editar .env con tus credenciales
+
+⚙️ Variables de Entorno
+env# Servidor
+PORT=8080
+APP_ENV=development
+
+# Base de datos
+DATABASE_URL=postgres://usuario:password@localhost:5432/inmobiliaria?sslmode=disable
+
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# JWT
+JWT_SECRET=tu_secreto_super_seguro
+
+# Cloudflare R2
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=inmobiliaria-fotos
+
+# Evolution API (WhatsApp)
+EVOLUTION_API_URL=http://localhost:8080
+EVOLUTION_API_KEY=...
+
+# Wompi (Pagos)
+WOMPI_PUBLIC_KEY=...
+WOMPI_PRIVATE_KEY=...
+
+# Gemini Flash
+GEMINI_API_KEY=...
+
+🗄️ Configurar Base de Datos
+bash# Levantar PostgreSQL con PostGIS via Docker
+docker-compose up -d postgres redis
+
+# Ejecutar migraciones
+go run ./cmd/migrate/main.go up
+
+# Seed de datos de prueba
+go run ./cmd/seed/main.go
+🔑 Credenciales de Prueba (después del seed)
+EmailPasswordRoladmin@inmobiliaria.bosuperadminADMINagente@inmobiliaria.boagente123AGENTE
+
+🎯 Modos de Ejecución
+Desarrollo
+bashgo run ./cmd/api/main.go
+# Servidor en http://localhost:8080
+Con hot reload (Air)
+bash# Instalar Air
+go install github.com/air-verse/air@latest
+
+# Ejecutar
+air
+Producción
+bash# Build
+go build -o bin/api ./cmd/api/main.go
+
+# Start
+./bin/api
+Docker Compose (recomendado)
+bash# Levantar todos los servicios
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f api
+
+📁 Estructura del Proyecto
+.
+├── cmd/
+│   ├── api/           # Entry point del servidor
+│   ├── migrate/       # Migraciones de base de datos
+│   └── seed/          # Datos de prueba
+├── internal/
+│   ├── modules/
+│   │   ├── auth/          # Autenticación JWT
+│   │   ├── propiedades/   # Gestión de propiedades
+│   │   ├── usuarios/      # Gestión de usuarios y CRM
+│   │   ├── busqueda/      # Búsqueda con filtros + PostGIS
+│   │   ├── chatbot/       # Integración Evolution API / n8n
+│   │   ├── pagos/         # QR + Wompi
+│   │   ├── suscripciones/ # Planes y renovaciones
+│   │   └── admin/         # Panel de administración
+│   ├── shared/
+│   │   ├── config/        # Configuración (DB, Redis, R2)
+│   │   ├── middleware/    # Auth, CORS, rate limit
+│   │   └── utils/         # JWT, QR, imágenes
+│   └── database/
+│       ├── migrations/    # Archivos SQL de migración
+│       └── models/        # Modelos de datos
+├── docker-compose.yml
+├── .env.example
+└── README.md
+
+🔌 API Endpoints
+Autenticación
+POST   /api/auth/register       Registro de usuario
+POST   /api/auth/login          Inicio de sesión
+GET    /api/auth/me             Usuario actual
+Propiedades
+GET    /api/propiedades         Listar con filtros
+GET    /api/propiedades/:id     Detalle de propiedad
+POST   /api/propiedades         Crear propiedad (autenticado)
+PUT    /api/propiedades/:id     Editar propiedad
+DELETE /api/propiedades/:id     Eliminar propiedad
+Búsqueda
+GET    /api/busqueda            Búsqueda con filtros avanzados
+GET    /api/busqueda/mapa       Propiedades para mapa (GeoJSON)
+Chatbot / WhatsApp
+POST   /api/chatbot/webhook     Webhook de Evolution API
+POST   /api/chatbot/estado      Actualizar estado de conversación
+Favoritos
+POST   /api/favoritos/:id       Guardar favorito
+DELETE /api/favoritos/:id       Quitar favorito
+GET    /api/favoritos           Mis favoritos
+Pagos
+POST   /api/pagos/qr            Generar QR de pago
+POST   /api/pagos/webhook       Webhook de confirmación Wompi
+GET    /api/pagos/historial     Historial de pagos
+Admin
+GET    /api/admin/dashboard         Métricas generales
+GET    /api/admin/propiedades       Cola de revisión
+PUT    /api/admin/propiedades/:id   Aprobar / rechazar / pausar
+GET    /api/admin/usuarios          Gestión de usuarios
+GET    /api/admin/suscripciones     Historial de suscripciones
+
+📁 Scripts Disponibles
+bashgo run ./cmd/api/main.go          # Servidor desarrollo
+go run ./cmd/migrate/main.go up   # Ejecutar migraciones
+go run ./cmd/migrate/main.go down # Revertir última migración
+go run ./cmd/seed/main.go         # Cargar datos de prueba
+go build -o bin/api ./cmd/api     # Compilar para producción
+go test ./...                     # Ejecutar tests
+
+🚀 Deploy en Contabo VPS con Docker
+Arquitectura en el servidor
+Contabo VPS (Cloud VPS 20 — 6 vCPU / 12 GB RAM recomendado)
+└── Docker Compose
+    ├── nginx          ← Reverse proxy + SSL (puerto 80/443)
+    ├── api            ← Go + Fiber (puerto 8080)
+    ├── postgres       ← PostgreSQL + PostGIS (puerto 5432)
+    ├── redis          ← Caché + estado chatbot (puerto 6379)
+    ├── evolution-api  ← WhatsApp (puerto 8081)
+    ├── n8n            ← Automatizaciones (puerto 5678)
+    └── chatwoot       ← Bandeja de mensajes (puerto 3000)
+Pasos de deploy
+bash# 1. Conectarse al VPS
+ssh root@IP_DE_CONTABO
+
+# 2. Instalar Docker y Docker Compose
+apt update && apt upgrade -y
+apt install -y docker.io docker-compose git
+
+# 3. Clonar el repositorio
+git clone https://github.com/tu-usuario/inmobiliaria-api.git
+cd inmobiliaria-api
+
+# 4. Configurar variables de entorno
+cp .env.example .env
+nano .env   # Completar con credenciales reales
+
+# 5. Levantar todos los servicios
+docker-compose -f docker-compose.prod.yml up -d
+
+# 6. Ejecutar migraciones dentro del contenedor
+docker-compose exec api go run ./cmd/migrate/main.go up
+
+# 7. Ver que todo esté corriendo
+docker-compose ps
+docker-compose logs -f api
+Configurar SSL con Let's Encrypt
+bash# Instalar Certbot
+apt install -y certbot python3-certbot-nginx
+
+# Generar certificado
+certbot --nginx -d api.tudominio.com
+
+# Renovación automática (ya se configura sola)
+certbot renew --dry-run
+Actualizar en producción
+bash# Traer últimos cambios
+git pull origin main
+
+# Rebuildar y reiniciar solo el servicio api
+docker-compose -f docker-compose.prod.yml up -d --build api
+
+# Ver logs en tiempo real
+docker-compose logs -f api
+
+📚 Recursos
+
+Go
+Fiber
+PostgreSQL
+PostGIS
+Redis
+Evolution API
+Cloudflare R2
+
+
+👨‍💻 Autor
+Tu nombre / equipo
+📄 Licencia
+MIT
