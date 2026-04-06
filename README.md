@@ -317,7 +317,7 @@ docker-compose logs -f api
 
 ## 👨‍💻 Autor
 
-**Tu nombre / equipo**
+**365Soft**
 
 ## 📄 Licencia
 
