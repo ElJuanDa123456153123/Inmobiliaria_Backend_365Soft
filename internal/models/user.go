@@ -1,0 +1,56 @@
+package models
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// UserRole - Roles de usuario en el sistema
+type UserRole string
+
+const (
+	RoleUsuario       UserRole = "usuario"       // Usuario normal
+	RoleAgente        UserRole = "agente"        // Agente inmobiliario
+	RoleInmobiliaria  UserRole = "inmobiliaria"  // Inmobiliaria
+	RoleAdmin         UserRole = "admin"         // Administrador del sistema
+)
+
+// User - Modelo de usuario
+type User struct {
+	ID        uint           `gorm:"primaryKey" json:"id"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+
+	// Información básica
+	Nombre  string `gorm:"size:100;not null" json:"nombre"`
+	Email   string `gorm:"size:150;uniqueIndex;not null" json:"email"`
+	Password string `gorm:"size:255;not null" json:"-"` // No se envía en JSON
+	Telefono string `gorm:"size:20" json:"telefono"`
+
+	// Tipo de usuario
+	Rol UserRole `gorm:"size:20;not null;default:'usuario'" json:"rol"`
+
+	// Información de inmobiliaria (si aplica)
+	NombreInmobiliaria string `gorm:"size:200" json:"nombre_inmobiliaria,omitempty"`
+	NIT                string `gorm:"size:20" json:"nit,omitempty"`
+
+	// Estado
+	Activo      bool   `gorm:"default:true" json:"activo"`
+	Verificado  bool   `gorm:"default:false" json:"verificado"`
+	EmailToken  string `gorm:"size:255" json:"-"` // Token para verificación
+
+	// Avatar (URL)
+	AvatarURL string `gorm:"size:500" json:"avatar_url,omitempty"`
+}
+
+// TableName - Especifica el nombre de la tabla en PostgreSQL
+func (User) TableName() string {
+	return "usuarios"
+}
+
+// BeforeCreate - Hook antes de crear un usuario
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	return nil
+}
