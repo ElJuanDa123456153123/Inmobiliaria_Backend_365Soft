@@ -49,10 +49,24 @@ go run cmd/api/main.go
 
 ## 📥 Instalación desde Repositorio
 
+⚠️ **IMPORTANTE:** Para evitar problemas con las rutas en Docker Compose, sigue estos pasos exactamente:
+
 ```bash
-# Clonar el repositorio
-git clone https://github.com/tu-usuario/inmobiliaria-backend.git
-cd inmobiliaria-backend
+# 1. Crear carpeta principal del proyecto
+mkdir Inmobiliaria365Soft
+cd Inmobiliaria365Soft
+
+# 2. Clonar el repositorio frontend
+git clone https://github.com/365Soft-Bolivia/Inmobiliaria_Frontend_365Soft.git
+
+# 3. Volver a la carpeta raiz
+cd ..
+
+# 4. Clonar el repositorio backend
+git clone https://github.com/365Soft-Bolivia/Inmobiliaria_Backend_365Soft.git
+
+# 5. Entrar a la carpeta backend
+cd Inmobiliaria_Backend_365Soft
 
 # Instalar dependencias de Go
 go mod tidy
@@ -62,6 +76,15 @@ cp .env.example .env
 
 # Editar .env con tus credenciales
 ```
+
+**Estructura esperada:**
+```
+Inmobiliaria365Soft/
+├── Inmobiliaria_Frontend_365Soft/
+└── Inmobiliaria_Backend_365Soft/
+```
+
+Esta estructura es necesaria para que el `docker-compose.yml` funcione correctamente con las rutas relativas de los volúmenes y las redes.
 
 ## ⚙️ Variables de Entorno
 
@@ -160,9 +183,11 @@ docker-compose logs -f api
 
 **Requiere Docker y Docker Compose instalados.**
 
+⚠️ **IMPORTANTE:** Asegúrate de tener ambos repositorios clonados en la misma carpeta principal siguiendo las instrucciones de la sección "Instalación desde Repositorio".
+
 ```bash
-# Desde la carpeta principal del proyecto
-cd ..
+# Desde la carpeta principal Inmobiliaria365Soft
+cd Inmobiliaria365Soft
 
 # Levantar todos los servicios (Frontend + Backend + PostgreSQL + Redis)
 docker-compose up --build
