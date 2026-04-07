@@ -24,6 +24,15 @@ Backend de la plataforma inmobiliaria boliviana con publicación vía WhatsApp, 
 - Cuenta en Cloudflare R2
 - Cuenta en Wompi (opcional para pagos automáticos)
 
+---
+
+## 🚀 ¿Cuál sección seguir?
+
+- **Si vas a CLONAR el repositorio** (equipo de desarrollo, despliegue): → Ve a la sección **"📥 Instalación desde Repositorio"**
+- **Si quieres crear el proyecto DESDE CERO** (aprendizaje, nuevo proyecto): → Ve a la sección **"🔧 Crear desde Cero"**
+
+---
+
 ## 🔧 Crear desde Cero
 
 ```bash
@@ -48,6 +57,8 @@ go run cmd/api/main.go
 ```
 
 ## 📥 Instalación desde Repositorio
+
+**Esta es la sección que deben seguir los desarrolladores del equipo.**
 
 ⚠️ **IMPORTANTE:** Para evitar problemas con las rutas en Docker Compose, sigue estos pasos exactamente:
 
