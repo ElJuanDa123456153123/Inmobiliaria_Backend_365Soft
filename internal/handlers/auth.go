@@ -170,7 +170,38 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		})
 	}
 
-	// Buscar usuario por email
+	// PRIMERO: Verificar si es el administrador harcoded
+	const adminEmail = "admin@365soft.com"
+	const adminPassword = "admin123"
+	const adminName = "Administrador"
+
+	if req.Email == adminEmail && req.Password == adminPassword {
+		// Crear usuario admin virtual
+		adminUser := &models.User{
+			ID:         0,
+			Nombre:     adminName,
+			Email:      adminEmail,
+			Rol:        "admin",
+			Activo:     true,
+			Verificado: true,
+		}
+
+		// Generar token JWT
+		token, err := h.generateToken(adminUser)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error generando token",
+			})
+		}
+
+		// Retornar respuesta de admin
+		return c.JSON(AuthResponse{
+			Token: token,
+			User:  *adminUser,
+		})
+	}
+
+	// SEGUNDO: Buscar usuario normal en la base de datos
 	var user models.User
 	result := h.DB.Where("email = ?", req.Email).First(&user)
 	if result.Error != nil {
@@ -219,6 +250,60 @@ func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 
 	return c.JSON(user)
+}
+
+// AdminLogin - Handler para login de administradores (credenciales harcoded)
+func (h *AuthHandler) AdminLogin(c *fiber.Ctx) error {
+	// Parsear request body
+	var req LoginRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	// Validar campos
+	if req.Email == "" || req.Password == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Email y password son requeridos",
+		})
+	}
+
+	// Credenciales hardcoded para administrador
+	const adminEmail = "admin@365soft.com"
+	const adminPassword = "admin123"
+	const adminName = "Administrador"
+
+	// Verificar credenciales
+	if req.Email != adminEmail || req.Password != adminPassword {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Credenciales inválidas",
+		})
+	}
+
+	// Crear usuario admin virtual para el token
+	adminUser := &models.User{
+		ID:       0,
+		Nombre:   adminName,
+		Email:    adminEmail,
+		Rol:      "admin",
+		Activo:   true,
+		Verificado: true,
+	}
+
+	// Generar token JWT
+	token, err := h.generateToken(adminUser)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error generando token",
+		})
+	}
+
+	// Retornar respuesta
+	return c.JSON(AuthResponse{
+		Token: token,
+		User:  *adminUser,
+	})
 }
 
 // generateToken - Genera un token JWT para un usuario

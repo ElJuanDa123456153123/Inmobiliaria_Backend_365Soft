@@ -52,6 +52,13 @@ func main() {
 		// No es fatal, continuar sin Google Auth
 	}
 
+	// Inicializar handler de administración
+	adminHandler, err := handlers.NewAdminHandler()
+	if err != nil {
+		log.Printf("⚠️  Admin handler no disponible: %v", err)
+		// No es fatal, continuar sin admin handler
+	}
+
 	// Rutas de salud
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -75,6 +82,9 @@ func main() {
 	auth.Post("/register", authHandler.Register)
 	auth.Post("/login", authHandler.Login)
 
+	// Ruta de login para administradores (harcodeada)
+	auth.Post("/admin/login", authHandler.AdminLogin)
+
 	// Rutas de Google OAuth (PÚBLICAS - sin autenticación)
 	if googleAuthHandler != nil {
 		app.Get("/api/auth/google", googleAuthHandler.GoogleLogin)
@@ -89,6 +99,15 @@ func main() {
 	// Ruta de completar perfil de Google (protegida - requiere token)
 	if googleAuthHandler != nil {
 		protected.Post("/auth/google/complete-profile", googleAuthHandler.CompleteGoogleProfile)
+	}
+
+	// Rutas de administración (protegidas - requieren autenticación)
+	if adminHandler != nil {
+		admin := api.Group("/admin")
+		admin.Use(middleware.AuthMiddleware())
+		admin.Get("/users", adminHandler.GetUsers)
+		admin.Patch("/users/:id/toggle-active", adminHandler.ToggleUserActive)
+		admin.Delete("/users/:id", adminHandler.DeleteUser)
 	}
 
 	// Iniciar servidor

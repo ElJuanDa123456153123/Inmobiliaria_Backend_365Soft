@@ -59,33 +59,46 @@ func AuthMiddleware() fiber.Handler {
 			})
 		}
 
-		// Conectar a la base de datos
-		dbConfig, err := config.NewDatabase()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error conectando a la base de datos",
-			})
-		}
-
-		// Buscar usuario en la base de datos
 		var user models.User
-		result := dbConfig.DB.First(&user, uint(userID))
-		if result.Error != nil {
-			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"error": "Usuario no encontrado",
+
+		// VERIFICAR SI ES ADMIN HARDCODED (ID = 0)
+		if uint(userID) == 0 {
+			// Crear usuario admin virtual
+			user = models.User{
+				ID:         0,
+				Nombre:     "Administrador",
+				Email:      "admin@365soft.com",
+				Rol:        "admin",
+				Activo:     true,
+				Verificado: true,
+			}
+		} else {
+			// Usuario normal, buscar en la base de datos
+			dbConfig, err := config.NewDatabase()
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Error conectando a la base de datos",
 				})
 			}
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error buscando usuario",
-			})
-		}
 
-		// Verificar si el usuario está activo
-		if !user.Activo {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "Usuario inactivo",
-			})
+			result := dbConfig.DB.First(&user, uint(userID))
+			if result.Error != nil {
+				if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+					return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+						"error": "Usuario no encontrado",
+					})
+				}
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Error buscando usuario",
+				})
+			}
+
+			// Verificar si el usuario está activo
+			if !user.Activo {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"error": "Usuario inactivo",
+				})
+			}
 		}
 
 		// Inyectar usuario en el contexto
