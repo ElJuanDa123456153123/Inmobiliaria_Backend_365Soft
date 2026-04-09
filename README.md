@@ -163,6 +163,8 @@ go run ./cmd/seed/main.go
 |-------|----------|-----|
 | admin@inmobiliaria.bo | superadmin | ADMIN |
 | agente@inmobiliaria.bo | agente123 | AGENTE |
+| inmobiliaria@test.com | Inmob123! | INMOBILIARIA |
+| usuario@test.com | User123! | USUARIO |
 
 ## 🎯 Modos de Ejecución
 
