@@ -82,7 +82,7 @@ func main() {
 	auth.Post("/register", authHandler.Register)
 	auth.Post("/login", authHandler.Login)
 
-	// Ruta de login para administradores (harcodeada)
+	// Ruta de login estricta para administradores
 	auth.Post("/admin/login", authHandler.AdminLogin)
 
 	// Rutas de Google OAuth (PÚBLICAS - sin autenticación)
