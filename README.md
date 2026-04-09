@@ -1,19 +1,32 @@
-# 🏠 Plataforma Inmobiliaria — Backend
+# 🏠 Plataforma Inmobiliaria 365Soft — Backend
 
-Backend de la plataforma inmobiliaria boliviana con publicación vía WhatsApp, CRM integrado, mapa interactivo y gestión de suscripciones.
+Backend SaaS inmobiliario boliviano con publicación de propiedades, CRM integrado, búsqueda avanzada y gestión de suscripciones.
+
+## 🎯 Documentación Completa
+
+**⚠️ IMPORTANTE:** Este proyecto tiene documentación técnica completa. Para entender el sistema, empezar por:
+
+📖 **[Documentación Completa](./docs/00_INDEX_DOCUMENTACION.md)** - Índice general de toda la documentación
+
+📋 **Documentos principales:**
+- [Requerimientos Funcionales](./docs/01_REQUERIMIENTOS_FUNCIONALES.md) - Todo lo que el sistema hace
+- [Requerimientos No Funcionales](./docs/02_REQUERIMIENTOS_NO_FUNCIONALES.md) - Performance, seguridad, escalabilidad
+- [Modelo de Datos](./docs/03_MODELO_DE_DATOS.md) - 12 entidades de la base de datos
+- [Arquitectura Técnica](./docs/05_ARQUITECTURA.md) - Patrones, estructura, convenciones
+- [Estrategia de Equipo](./docs/00_STRATEGY_TEAM.md) - Cómo trabajar 3 personas en paralelo
 
 ## 🚀 Stack Tecnológico
 
-| Capa | Tecnología |
-|------|------------|
-| Lenguaje | Go 1.22+ |
-| Framework | Fiber v2 |
-| Base de datos | PostgreSQL 15+ con PostGIS |
-| Caché / Estado | Redis 7+ |
-| Chatbot | Evolution API + n8n + Gemini Flash |
-| Fotos | Cloudflare R2 (compatible S3) |
-| Pagos | QR boliviano + Wompi |
-| Contenedores | Docker + Docker Compose |
+| Capa | Tecnología | Versión |
+|------|------------|---------|
+| Lenguaje | Go | 1.26.1 |
+| Framework | Fiber | v2.52.12 |
+| Base de datos | PostgreSQL + GORM | 15+ / v1.31.1 |
+| Cache | Redis | 7+ |
+| Storage | Cloudflare R2 | S3-compatible |
+| Pagos | Banco Bisa QR | - |
+| Auth | JWT + Google OAuth | v5.3.1 |
+| Contenedores | Docker + Docker Compose | - |
 
 ## 📋 Requisitos Previos
 

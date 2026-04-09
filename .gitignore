@@ -1,0 +1,68 @@
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+
+# Binarios compilados
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Dependencias
+vendor/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Base de datos local
+*.db
+*.sqlite
+*.sqlite3
+
+# IDEs y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Archivos temporales
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Certificados y keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Backups
+*.bak
+*.backup
+*~
+
+# Cache y dependencies
+.cache/
+node_modules/
+
+#Archivos de sistema de Windows
+Thumbs.db
+Desktop.ini
+
+# Archivos específicos del proyecto
+nul
