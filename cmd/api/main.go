@@ -107,6 +107,8 @@ func main() {
 		admin.Use(middleware.AuthMiddleware())      // Primero verificar autenticación
 		admin.Use(middleware.AdminMiddleware())      // Luego verificar rol de admin
 		admin.Get("/users", adminHandler.GetUsers)
+		admin.Post("/users", adminHandler.CreateUser)
+		admin.Put("/users/:id", adminHandler.UpdateUser)
 		admin.Patch("/users/:id/toggle-active", adminHandler.ToggleUserActive)
 		admin.Delete("/users/:id", adminHandler.DeleteUser)
 	}
