@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -14,9 +15,16 @@ import (
 type Database struct {
 	DB *gorm.DB
 }
+var (
+	dbInstance *Database
+	dbErr      error
+	dbOnce     sync.Once
+)
 
-// NewDatabase - Crea una nueva conexión a PostgreSQL
+// NewDatabase - Crea y retorna una única conexión a PostgreSQL (Singleton)
 func NewDatabase() (*Database, error) {
+	dbOnce.Do(func() {
+
 	// Obtener URL de la base de datos desde variables de entorno
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -29,25 +37,26 @@ func NewDatabase() (*Database, error) {
 		Logger: logger.Default.LogMode(logger.Info),
 	}
 
-	// Abrir conexión
-	db, err := gorm.Open(postgres.Open(databaseURL), gormConfig)
-	if err != nil {
-		return nil, fmt.Errorf("error conectando a la base de datos: %w", err)
-	}
+		db, err := gorm.Open(postgres.Open(databaseURL), gormConfig)
+		if err != nil {
+			dbErr = fmt.Errorf("error conectando a la base de datos: %w", err)
+			return
+		}
 
-	// Configurar pool de conexiones
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("error obteniendo conexión SQL: %w", err)
-	}
+		sqlDB, err := db.DB()
+		if err != nil {
+			dbErr = fmt.Errorf("error obteniendo conexión SQL: %w", err)
+			return
+		}
 
-	// Configurar pool
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(100)
 
-	log.Println("✅ Conectado a PostgreSQL exitosamente")
+		log.Println("✅ Conectado a PostgreSQL exitosamente")
+		dbInstance = &Database{DB: db}
+	})
 
-	return &Database{DB: db}, nil
+	return dbInstance, dbErr
 }
 
 // Close - Cierra la conexión a la base de datos
