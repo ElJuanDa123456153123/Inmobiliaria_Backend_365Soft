@@ -29,7 +29,7 @@ func main() {
 		AppName: "Inmobiliaria API v1.0",
 	})
 
-	// Middleware
+	// Middleware básico (se sobrescribirá con SetupRoutes pero lo mantenemos por seguridad)
 	app.Use(logger.New())
 	app.Use(recover.New())
 	app.Use(cors.New(cors.Config{
@@ -59,14 +59,10 @@ func main() {
 		// No es fatal, continuar sin admin handler
 	}
 
-	// Rutas de salud
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"status":  "ok",
-			"message": "API is running",
-		})
-	})
+	// Configurar rutas principales con SetupRoutes (incluye middleware profesional y rutas de propiedades)
+	SetupRoutes(app)
 
+	// Rutas de salud (ya están incluidas en SetupRoutes, pero mantenemos las originales por compatibilidad)
 	app.Get("/api", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"message": "Bienvenido a la API de Inmobiliaria Bolivia",
@@ -114,8 +110,13 @@ func main() {
 	// Iniciar servidor
 	log.Println("🚀 Servidor corriendo en http://localhost:3001")
 	log.Println("📊 Endpoints disponibles:")
-	log.Println("  POST   /api/auth/register  - Registro de usuario")
-	log.Println("  POST   /api/auth/login     - Login de usuario")
-	log.Println("  GET    /api/auth/me        - Obtener usuario actual (requiere token)")
+	log.Println("  POST   /api/auth/register          - Registro de usuario")
+	log.Println("  POST   /api/auth/login             - Login de usuario")
+	log.Println("  GET    /api/auth/me                - Obtener usuario actual (requiere token)")
+	log.Println("  GET    /api/properties              - Listar propiedades")
+	log.Println("  GET    /api/properties/:id          - Obtener propiedad por ID")
+	log.Println("  POST   /api/properties              - Crear propiedad")
+	log.Println("  PUT    /api/properties/:id          - Actualizar propiedad")
+	log.Println("  DELETE /api/properties/:id          - Eliminar propiedad")
 	log.Fatal(app.Listen(":3001"))
 }
