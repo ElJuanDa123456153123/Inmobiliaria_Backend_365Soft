@@ -95,3 +95,24 @@ func AuthMiddleware() fiber.Handler {
 		return c.Next()
 	}
 }
+
+// AdminMiddleware - Middleware para verificar rol de administrador
+func AdminMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		user, ok := c.Locals("user").(*models.User)
+		if !ok || user == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Usuario no autenticado",
+			})
+		}
+
+		// Verificar rol
+		if user.Rol != models.RoleAdmin {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Acceso denegado: se requiere rol de administrador",
+			})
+		}
+
+		return c.Next()
+	}
+}

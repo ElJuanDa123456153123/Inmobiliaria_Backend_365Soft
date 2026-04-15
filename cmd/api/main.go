@@ -56,7 +56,12 @@ func main() {
 	adminHandler, err := handlers.NewAdminHandler()
 	if err != nil {
 		log.Printf("⚠️  Admin handler no disponible: %v", err)
-		// No es fatal, continuar sin admin handler
+	}
+
+	// Inicializar handler de planes
+	planHandler, err := handlers.NewPlanHandler()
+	if err != nil {
+		log.Printf("⚠️  Plan handler no disponible: %v", err)
 	}
 
 	// Rutas de salud
@@ -105,9 +110,28 @@ func main() {
 	if adminHandler != nil {
 		admin := api.Group("/admin")
 		admin.Use(middleware.AuthMiddleware())
+		admin.Use(middleware.AdminMiddleware()) // Asegurar que sea admin
+		
+		// Gestión de Usuarios
 		admin.Get("/users", adminHandler.GetUsers)
+		admin.Post("/users", adminHandler.CreateUser)
+		admin.Put("/users/:id", adminHandler.UpdateUser)
 		admin.Patch("/users/:id/toggle-active", adminHandler.ToggleUserActive)
 		admin.Delete("/users/:id", adminHandler.DeleteUser)
+
+		// Gestión de Planes (Planes de suscripción)
+		if planHandler != nil {
+			admin.Get("/planes", planHandler.GetPlans)
+			admin.Post("/planes", planHandler.CreatePlan)
+			admin.Put("/planes/:id", planHandler.UpdatePlan)
+			admin.Delete("/planes/:id", planHandler.DeletePlan)
+		}
+	}
+
+	// Rutas Públicas de Planes
+	if planHandler != nil {
+		api.Get("/planes", planHandler.GetPlans)
+		api.Get("/planes/:id", planHandler.GetPlan)
 	}
 
 	// Iniciar servidor
