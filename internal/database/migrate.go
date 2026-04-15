@@ -16,8 +16,11 @@ func AutoMigrate() error {
 		return fmt.Errorf("error conectando a la base de datos: %w", err)
 	}
 
-	// Migrar el modelo User
-	err = db.DB.AutoMigrate(&models.User{})
+	// Migrar los modelos
+	err = db.DB.AutoMigrate(
+		&models.User{},
+		&models.Plan{},
+	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)
 	}
