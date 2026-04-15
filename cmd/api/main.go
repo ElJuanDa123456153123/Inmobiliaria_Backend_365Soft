@@ -33,9 +33,9 @@ func main() {
 	app.Use(logger.New())
 	app.Use(recover.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "http://localhost:3000,http://localhost:3001",
+		AllowOrigins:     "http://localhost:3000,http://localhost:3001,http://localhost:3002",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
-		AllowMethods:     "GET, POST, PUT, DELETE, PATCH",
+		AllowMethods:     "GET, POST, PUT, DELETE, PATCH, OPTIONS",
 		AllowCredentials: true,
 	}))
 
@@ -101,11 +101,14 @@ func main() {
 		protected.Post("/auth/google/complete-profile", googleAuthHandler.CompleteGoogleProfile)
 	}
 
-	// Rutas de administración (protegidas - requieren autenticación)
+	// Rutas de administración (protegidas - requieren rol de admin)
 	if adminHandler != nil {
 		admin := api.Group("/admin")
-		admin.Use(middleware.AuthMiddleware())
+		admin.Use(middleware.AuthMiddleware())      // Primero verificar autenticación
+		admin.Use(middleware.AdminMiddleware())      // Luego verificar rol de admin
 		admin.Get("/users", adminHandler.GetUsers)
+		admin.Post("/users", adminHandler.CreateUser)
+		admin.Put("/users/:id", adminHandler.UpdateUser)
 		admin.Patch("/users/:id/toggle-active", adminHandler.ToggleUserActive)
 		admin.Delete("/users/:id", adminHandler.DeleteUser)
 	}
