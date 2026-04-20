@@ -1,0 +1,346 @@
+package admin
+
+import (
+	"fmt"
+
+	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
+	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/models"
+	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
+)
+
+// AdvisorHandler - Handler para gestión de asesores
+type AdvisorHandler struct {
+	DB *config.Database
+}
+
+// NewAdvisorHandler - Crea un nuevo handler de asesores
+func NewAdvisorHandler() (*AdvisorHandler, error) {
+	dbConfig, err := config.NewDatabase()
+	if err != nil {
+		return nil, err
+	}
+
+	return &AdvisorHandler{
+		DB: dbConfig,
+	}, nil
+}
+
+// GetAdvisors - Obtiene todos los asesores con paginación y filtros
+func (h *AdvisorHandler) GetAdvisors(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		fmt.Printf("❌ ERROR creando conexión: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	// Parsear query params
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	activo := c.Query("activo", "")
+	search := c.Query("search", "")
+
+	offset := (page - 1) * limit
+
+	// Construir query
+	query := db.DB.Model(&models.Advisor{})
+
+	// Filtro por activo
+	if activo != "" {
+		if activo == "true" {
+			query = query.Where("activo = ?", true)
+		} else if activo == "false" {
+			query = query.Where("activo = ?", false)
+		}
+	}
+
+	// Búsqueda
+	if search != "" {
+		searchTerm := "%" + search + "%"
+		query = query.Where("nombre ILIKE ? OR email ILIKE ?", searchTerm, searchTerm)
+	}
+
+	// Contar total
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		fmt.Printf("❌ ERROR contando asesores: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error contando asesores",
+		})
+	}
+
+	// Obtener asesores con paginación
+	var advisors []models.Advisor
+	if err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&advisors).Error; err != nil {
+		fmt.Printf("❌ ERROR obteniendo asesores: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo asesores",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"advisors": advisors,
+		"total":    total,
+		"page":     page,
+		"limit":    limit,
+	})
+}
+
+// GetAdvisor - Obtiene un asesor por ID
+func (h *AdvisorHandler) GetAdvisor(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	id := c.Params("id")
+
+	var advisor models.Advisor
+	// Incluir propiedades asignadas
+	if err := db.DB.Preload("Propiedades").First(&advisor, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "Asesor no encontrado",
+			})
+		}
+		fmt.Printf("❌ ERROR obteniendo asesor: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo asesor",
+		})
+	}
+
+	return c.JSON(advisor)
+}
+
+// CreateAdvisorRequest - Estructura para crear asesor
+type CreateAdvisorRequest struct {
+	Nombre       string `json:"nombre"`
+	Email        string `json:"email"`
+	Telefono     string `json:"telefono"`
+	Especialidad string `json:"especialidad"`
+	Activo       *bool  `json:"activo"`
+}
+
+// CreateAdvisor - Crea un nuevo asesor
+func (h *AdvisorHandler) CreateAdvisor(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	var req CreateAdvisorRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	// Validaciones básicas
+	if req.Nombre == "" || req.Email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Nombre y email son requeridos",
+		})
+	}
+
+	// Verificar si el email ya existe
+	var existingAdvisor models.Advisor
+	if err := db.DB.Where("email = ?", req.Email).First(&existingAdvisor).Error; err == nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "El email ya está registrado",
+		})
+	}
+
+	// Valor por defecto para Activo si no se proporciona
+	activo := true
+	if req.Activo != nil {
+		activo = *req.Activo
+	}
+
+	advisor := models.Advisor{
+		Nombre:       req.Nombre,
+		Email:        req.Email,
+		Telefono:     req.Telefono,
+		Especialidad: req.Especialidad,
+		Activo:       activo,
+	}
+
+	if err := db.DB.Create(&advisor).Error; err != nil {
+		fmt.Printf("❌ ERROR creando asesor: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error creando el asesor",
+		})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"message": "Asesor creado exitosamente",
+		"advisor": advisor,
+	})
+}
+
+// UpdateAdvisorRequest - Estructura para actualizar asesor
+type UpdateAdvisorRequest struct {
+	Nombre       string `json:"nombre"`
+	Email        string `json:"email"`
+	Telefono     string `json:"telefono"`
+	Especialidad string `json:"especialidad"`
+	Activo       *bool  `json:"activo"`
+}
+
+// UpdateAdvisor - Actualiza un asesor existente
+func (h *AdvisorHandler) UpdateAdvisor(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	id := c.Params("id")
+
+	var req UpdateAdvisorRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	// Buscar asesor existente
+	var advisor models.Advisor
+	if err := db.DB.First(&advisor, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "Asesor no encontrado",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo asesor",
+		})
+	}
+
+	// Verificar si el email ya existe (excluyendo el asesor actual)
+	if req.Email != "" && req.Email != advisor.Email {
+		var existingAdvisor models.Advisor
+		if err := db.DB.Where("email = ? AND id != ?", req.Email, id).First(&existingAdvisor).Error; err == nil {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "El email ya está registrado",
+			})
+		}
+	}
+
+	// Actualizar campos solo si se proporcionan
+	if req.Nombre != "" {
+		advisor.Nombre = req.Nombre
+	}
+	if req.Email != "" {
+		advisor.Email = req.Email
+	}
+	if req.Telefono != "" {
+		advisor.Telefono = req.Telefono
+	}
+	if req.Especialidad != "" {
+		advisor.Especialidad = req.Especialidad
+	}
+	if req.Activo != nil {
+		advisor.Activo = *req.Activo
+	}
+
+	if err := db.DB.Save(&advisor).Error; err != nil {
+		fmt.Printf("❌ ERROR actualizando asesor: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error actualizando el asesor",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Asesor actualizado exitosamente",
+		"advisor": advisor,
+	})
+}
+
+// DeleteAdvisor - Elimina un asesor (soft delete)
+func (h *AdvisorHandler) DeleteAdvisor(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	id := c.Params("id")
+
+	// Verificar que el asesor existe
+	var advisor models.Advisor
+	if err := db.DB.First(&advisor, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "Asesor no encontrado",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo asesor",
+		})
+	}
+
+	// Soft delete
+	if err := db.DB.Delete(&advisor).Error; err != nil {
+		fmt.Printf("❌ ERROR eliminando asesor: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error eliminando el asesor",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Asesor eliminado exitosamente",
+	})
+}
+
+// ToggleAdvisorActive - Activa/desactiva un asesor
+func (h *AdvisorHandler) ToggleAdvisorActive(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	id := c.Params("id")
+
+	// Buscar asesor
+	var advisor models.Advisor
+	if err := db.DB.First(&advisor, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "Asesor no encontrado",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo asesor",
+		})
+	}
+
+	// Toggle estado
+	advisor.Activo = !advisor.Activo
+
+	if err := db.DB.Save(&advisor).Error; err != nil {
+		fmt.Printf("❌ ERROR actualizando estado: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error actualizando estado del asesor",
+		})
+	}
+
+	estado := "inactivado"
+	if advisor.Activo {
+		estado = "activado"
+	}
+
+	return c.JSON(fiber.Map{
+		"message": fmt.Sprintf("Asesor %s exitosamente", estado),
+		"advisor": advisor,
+	})
+}

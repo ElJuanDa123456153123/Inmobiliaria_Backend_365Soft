@@ -15,6 +15,11 @@ import (
 // AuthMiddleware - Middleware de autenticación JWT
 func AuthMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin autenticación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
 		// Obtener token del header Authorization
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
@@ -113,6 +118,11 @@ func AuthMiddleware() fiber.Handler {
 // AdminMiddleware - Middleware que verifica si el usuario es admin
 func AdminMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin verificación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
 		// Obtener usuario del contexto (inyectado por AuthMiddleware)
 		user, ok := c.Locals("user").(*models.User)
 		if !ok {

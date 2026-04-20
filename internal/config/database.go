@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -15,16 +15,9 @@ import (
 type Database struct {
 	DB *gorm.DB
 }
-var (
-	dbInstance *Database
-	dbErr      error
-	dbOnce     sync.Once
-)
 
-// NewDatabase - Crea y retorna una única conexión a PostgreSQL (Singleton)
+// NewDatabase - Crea una nueva conexión a PostgreSQL con reintentos
 func NewDatabase() (*Database, error) {
-	dbOnce.Do(func() {
-
 	// Obtener URL de la base de datos desde variables de entorno
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -37,26 +30,46 @@ func NewDatabase() (*Database, error) {
 		Logger: logger.Default.LogMode(logger.Info),
 	}
 
-		db, err := gorm.Open(postgres.Open(databaseURL), gormConfig)
-		if err != nil {
-			dbErr = fmt.Errorf("error conectando a la base de datos: %w", err)
-			return
+	// Configurar reintentos
+	maxRetries := 10
+	retryDelay := 3 * time.Second
+
+	var db *gorm.DB
+	var err error
+
+	// Intentar conectar con reintentos
+	for i := 0; i < maxRetries; i++ {
+		// Abrir conexión
+		db, err = gorm.Open(postgres.Open(databaseURL), gormConfig)
+		if err == nil {
+			// Conexión exitosa
+			break
 		}
 
-		sqlDB, err := db.DB()
-		if err != nil {
-			dbErr = fmt.Errorf("error obteniendo conexión SQL: %w", err)
-			return
+		// Log del intento fallido
+		if i < maxRetries-1 {
+			log.Printf("⏳ Intento %d/%d: No se pudo conectar a PostgreSQL. Reintentando en %v...",
+				i+1, maxRetries, retryDelay)
+			log.Printf("   Error: %v", err)
+			time.Sleep(retryDelay)
 		}
+	}
 
-		sqlDB.SetMaxIdleConns(10)
-		sqlDB.SetMaxOpenConns(100)
+	// Verificar si finalmente se pudo conectar
+	if err != nil {
+		return nil, fmt.Errorf("error conectando a la base de datos después de %d intentos: %w", maxRetries, err)
+	}
 
-		log.Println("✅ Conectado a PostgreSQL exitosamente")
-		dbInstance = &Database{DB: db}
-	})
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("error obteniendo conexión SQL: %w", err)
+	}
 
-	return dbInstance, dbErr
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+
+	log.Println("✅ Conectado a PostgreSQL exitosamente")
+	return &Database{DB: db}, nil
 }
 
 // Close - Cierra la conexión a la base de datos
@@ -66,4 +79,27 @@ func (d *Database) Close() error {
 		return err
 	}
 	return sqlDB.Close()
+}
+
+// NewDatabaseFromDSN - Crea una nueva conexión a PostgreSQL desde un DSN
+func NewDatabaseFromDSN(dsn string) (*Database, error) {
+	gormConfig := &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent), // Silencioso en tests
+	}
+
+	db, err := gorm.Open(postgres.Open(dsn), gormConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error conectando a la base de datos: %w", err)
+	}
+
+	// Configurar pool de conexiones
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("error obteniendo conexión SQL: %w", err)
+	}
+
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(20)
+
+	return &Database{DB: db}, nil
 }
