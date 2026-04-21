@@ -414,7 +414,7 @@ func (h *AuthHandler) UpdateDatosPublicos(c *fiber.Ctx) error {
 	})
 }
 
-// AdminLogin - Handler para login de administradores (credenciales harcoded)
+// AdminLogin - Handler para login de administradores (verificado contra la BD)
 func (h *AuthHandler) AdminLogin(c *fiber.Ctx) error {
 	// Parsear request body
 	var req LoginRequest
@@ -431,30 +431,43 @@ func (h *AuthHandler) AdminLogin(c *fiber.Ctx) error {
 		})
 	}
 
-	// Credenciales hardcoded para administrador
-	const adminEmail = "admin@365soft.com"
-	const adminPassword = "admin123"
-	const adminName = "Administrador"
+	// Buscar usuario en la base de datos
+	var user models.User
+	result := h.DB.Where("email = ?", req.Email).First(&user)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Credenciales inválidas",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error buscando usuario",
+		})
+	}
 
-	// Verificar credenciales
-	if req.Email != adminEmail || req.Password != adminPassword {
+	// Verificar que sea administrador
+	if user.Rol != models.RoleAdmin {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Acceso denegado: no es administrador",
+		})
+	}
+
+	// Verificar password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Credenciales inválidas",
 		})
 	}
 
-	// Crear usuario admin virtual para el token
-	adminUser := &models.User{
-		ID:       0,
-		Nombre:   adminName,
-		Email:    adminEmail,
-		Rol:      "admin",
-		Activo:   true,
-		Verificado: true,
+	// Verificar si el usuario está activo
+	if !user.Activo {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Usuario inactivo",
+		})
 	}
 
 	// Generar token JWT
-	token, err := h.generateToken(adminUser)
+	token, err := h.generateToken(&user)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error generando token",
@@ -464,7 +477,7 @@ func (h *AuthHandler) AdminLogin(c *fiber.Ctx) error {
 	// Retornar respuesta
 	return c.JSON(AuthResponse{
 		Token: token,
-		User:  *adminUser,
+		User:  user,
 	})
 }
 

@@ -110,6 +110,12 @@ func main() {
 		log.Printf("⚠️  Property admin handler no disponible: %v", err)
 	}
 
+	// Inicializar handler de planes
+	planHandler, err := handlers.NewPlanHandler()
+	if err != nil {
+		log.Printf("⚠️  Plan handler no disponible: %v", err)
+	}
+
 	// NOTA: propertyHandler ya fue inicializado arriba para rate limiting
 
 	// Inicializar handler de imágenes
@@ -149,7 +155,7 @@ func main() {
 	auth.Post("/register", authHandler.Register)
 	auth.Post("/login", authHandler.Login)
 
-	// Ruta de login para administradores (harcodeada)
+	// Ruta de login estricta para administradores
 	auth.Post("/admin/login", authHandler.AdminLogin)
 
 	// Rutas de Google OAuth (PÚBLICAS - sin autenticación)
@@ -180,6 +186,20 @@ func main() {
 		admin.Put("/users/:id", userHandler.UpdateUser)
 		admin.Patch("/users/:id/toggle-active", userHandler.ToggleUserActive)
 		admin.Delete("/users/:id", userHandler.DeleteUser)
+	}
+
+	// Gestión de Planes (Planes de suscripción)
+	if planHandler != nil {
+		admin.Get("/planes", planHandler.GetPlans)
+		admin.Post("/planes", planHandler.CreatePlan)
+		admin.Put("/planes/:id", planHandler.UpdatePlan)
+		admin.Delete("/planes/:id", planHandler.DeletePlan)
+	}
+
+	// Rutas Públicas de Planes
+	if planHandler != nil {
+		api.Get("/planes", planHandler.GetPlans)
+		api.Get("/planes/:id", planHandler.GetPlan)
 	}
 
 	// Rutas de gestión de asesores

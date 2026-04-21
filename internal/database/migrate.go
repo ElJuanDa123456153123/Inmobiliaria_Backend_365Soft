@@ -23,6 +23,7 @@ func AutoMigrate() error {
 		&models.Property{},
 		&models.PropertyImage{},
 		&models.AuditLog{}, // 🔒 Auditoría
+		&models.Plan{},     // 📋 Planes de suscripción
 	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)

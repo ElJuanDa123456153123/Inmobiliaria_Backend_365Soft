@@ -19,7 +19,7 @@ Sistema de autenticación completo construido con **Go + Fiber** que incluye:
 - ✅ Login con email/contraseña
 - ✅ Autenticación con Google OAuth 2.0
 - ✅ Tokens JWT con expiración de 24 horas
-- ✅ Validación de roles (usuario, agente, inmobiliaria)
+- ✅ Validación de roles (usuario, agente, inmobiliaria, admin)
 - ✅ Middleware de autenticación
 - ✅ Base de datos PostgreSQL
 
@@ -35,7 +35,7 @@ Sistema de autenticación completo construido con **Go + Fiber** que incluye:
 - 🚫 Protección contra inyección SQL con GORM
 
 ### Gestión de Usuarios
-- 👤 3 tipos de roles: Usuario, Agente, Inmobiliaria
+- 👤 4 tipos de roles: Usuario, Agente, Inmobiliaria, Administrador
 - 📱 Teléfono obligatorio para completar perfil
 - 🏢 Campos específicos para inmobiliarias (NIT, nombre)
 - ✅ Marca de verificación de email
@@ -171,7 +171,33 @@ Content-Type: application/json
 }
 ```
 
-#### 3. Login con Google
+#### 3. Login de Administrador
+```http
+POST /api/auth/admin/login
+Content-Type: application/json
+
+{
+  "email": "admin@inmobiliaria.bo",
+  "password": "superadmin"
+}
+```
+
+> **Nota:** Esta ruta exige estrictamente que la cuenta a loguear posea el rol `admin` para emitir el token.
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": 1,
+    "nombre": "Administrador",
+    "email": "admin@inmobiliaria.bo",
+    "rol": "admin"
+  }
+}
+```
+
+#### 4. Login con Google
 ```http
 GET /api/auth/google
 ```
@@ -190,7 +216,7 @@ Redirección a:
 
 Todas estas rutas requieren el header `Authorization: Bearer <token>`
 
-#### 4. Obtener Usuario Actual
+#### 5. Obtener Usuario Actual
 ```http
 GET /api/auth/me
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
@@ -209,7 +235,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 }
 ```
 
-#### 5. Completar Perfil de Google
+#### 6. Completar Perfil de Google
 ```http
 POST /api/auth/google/complete-profile
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
