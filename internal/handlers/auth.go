@@ -433,7 +433,7 @@ func (h *AuthHandler) AdminLogin(c *fiber.Ctx) error {
 
 	// Buscar usuario en la base de datos
 	var user models.User
-	result := h.DB.Where("email = ?", req.Email).First(&user)
+	result := h.DB.DB.Where("email = ?", req.Email).First(&user)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
