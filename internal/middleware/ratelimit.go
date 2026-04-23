@@ -99,8 +99,8 @@ func (r *RateLimiter) RateLimitByUserMiddleware(config RateLimitConfig) fiber.Ha
 
 // RateLimitByEndpointMiddleware - Rate limiting específico por endpoint
 type EndpointRateLimit struct {
-	Path              string
-	Config            RateLimitConfig
+	Path                 string
+	Config               RateLimitConfig
 	ApplyToAuthenticated bool
 }
 
@@ -134,25 +134,34 @@ func GetStandardRateLimits() []EndpointRateLimit {
 		{
 			Path: "/api/auth/login",
 			Config: RateLimitConfig{
-				RequestsPerMinute: 5,  // 5 intentos de login por minuto
+
+				RequestsPerMinute: 30,
+				RequestsPerHour:   100,
+				BanDuration:       5 * time.Minute,
+
+				/**RequestsPerMinute: 5,  // 5 intentos de login por minuto
 				RequestsPerHour:   20, // Máximo 20 por hora
-				BanDuration:       15 * time.Minute,
+				BanDuration:       15 * time.Minute,**/
 			},
 			ApplyToAuthenticated: false,
 		},
 		{
 			Path: "/api/auth/register",
 			Config: RateLimitConfig{
+				RequestsPerMinute: 10,
+				RequestsPerHour:   50,
+				BanDuration:       5 * time.Minute,
+				/**
 				RequestsPerMinute: 3,  // 3 registros por minuto
 				RequestsPerHour:   10, // Máximo 10 por hora
-				BanDuration:       30 * time.Minute,
+				BanDuration:       30 * time.Minute,**/
 			},
 			ApplyToAuthenticated: false,
 		},
 		{
 			Path: "/api/properties",
 			Config: RateLimitConfig{
-				RequestsPerMinute: 30, // 30 listados por minuto
+				RequestsPerMinute: 30,  // 30 listados por minuto
 				RequestsPerHour:   500, // 500 por hora
 				BanDuration:       5 * time.Minute,
 			},
@@ -161,7 +170,7 @@ func GetStandardRateLimits() []EndpointRateLimit {
 		{
 			Path: "/api/properties",
 			Config: RateLimitConfig{
-				RequestsPerMinute: 10, // 10 creaciones por minuto para usuarios autenticados
+				RequestsPerMinute: 10,  // 10 creaciones por minuto para usuarios autenticados
 				RequestsPerHour:   100, // 100 por hora
 				BanDuration:       10 * time.Minute,
 			},
@@ -170,7 +179,7 @@ func GetStandardRateLimits() []EndpointRateLimit {
 		{
 			Path: "/api/imagenes/upload",
 			Config: RateLimitConfig{
-				RequestsPerMinute: 10, // 10 uploads por minuto
+				RequestsPerMinute: 10,  // 10 uploads por minuto
 				RequestsPerHour:   100, // 100 por hora
 				BanDuration:       10 * time.Minute,
 			},

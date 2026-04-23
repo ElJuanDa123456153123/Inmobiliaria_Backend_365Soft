@@ -32,32 +32,11 @@ func main() {
 	})
 
 	// 🔒 Middleware profesional
-	app.Use(middleware.RecoverMiddleware())       // Recupera de panics
-	app.Use(middleware.RequestIDMiddleware())     // Añade ID único
-	app.Use(middleware.LoggingMiddleware())       // Logs estructurados
+	app.Use(middleware.RecoverMiddleware())         // Recupera de panics
+	app.Use(middleware.RequestIDMiddleware())       // Añade ID único
+	app.Use(middleware.LoggingMiddleware())         // Logs estructurados
 	app.Use(middleware.SecurityHeadersMiddleware()) // Headers de seguridad
-	app.Use(middleware.ErrorHandlerMiddleware())  // Manejo centralizado de errores
-
-	// 🚀 Rate Limiting con Redis (si está disponible)
-	var redisClient *config.RedisClient
-	propertyHandler, err := handlers.NewPropertyHandler()
-	if err == nil && propertyHandler.Redis != nil {
-		redisClient = propertyHandler.Redis
-		rateLimiter := middleware.NewRateLimiter(redisClient)
-
-		// Rate limiting estándar para todas las rutas
-		app.Use(rateLimiter.RateLimitMiddleware(middleware.RateLimitConfig{
-			RequestsPerMinute: 60,  // 60 requests por minuto por IP
-			RequestsPerHour:   1000, // 1000 por hora
-			BanDuration:       5 * time.Minute,
-		}))
-
-		// Rate limiting específico por endpoint
-		endpointLimits := middleware.GetStandardRateLimits()
-		app.Use(rateLimiter.RateLimitByEndpointsMiddleware(endpointLimits))
-	} else {
-		log.Println("⚠️  Rate limiting no disponible (Redis no conectado)")
-	}
+	app.Use(middleware.ErrorHandlerMiddleware())    // Manejo centralizado de errores
 
 	// CORS (personalizado)
 	app.Use(cors.New(cors.Config{
@@ -68,7 +47,7 @@ func main() {
 		ExposeHeaders:    "Content-Length, Content-Type",
 		MaxAge:           86400, // 24 horas
 		// Permitir preflight requests
-		Next:             nil,
+		Next: nil,
 	}))
 
 	// Manejar explícitamente preflight OPTIONS requests
@@ -80,6 +59,27 @@ func main() {
 		c.Set("Access-Control-Max-Age", "86400")
 		return c.SendStatus(fiber.StatusNoContent)
 	})
+
+	// 🚀 Rate Limiting con Redis (si está disponible)
+	var redisClient *config.RedisClient
+	propertyHandler, err := handlers.NewPropertyHandler()
+	if err == nil && propertyHandler.Redis != nil {
+		redisClient = propertyHandler.Redis
+		rateLimiter := middleware.NewRateLimiter(redisClient)
+
+		// Rate limiting estándar para todas las rutas
+		app.Use(rateLimiter.RateLimitMiddleware(middleware.RateLimitConfig{
+			RequestsPerMinute: 60,   // 60 requests por minuto por IP
+			RequestsPerHour:   1000, // 1000 por hora
+			BanDuration:       5 * time.Minute,
+		}))
+
+		// Rate limiting específico por endpoint
+		endpointLimits := middleware.GetStandardRateLimits()
+		app.Use(rateLimiter.RateLimitByEndpointsMiddleware(endpointLimits))
+	} else {
+		log.Println("⚠️  Rate limiting no disponible (Redis no conectado)")
+	}
 
 	// Inicializar handler de autenticación
 	authHandler, err := handlers.NewAuthHandler()
@@ -166,7 +166,7 @@ func main() {
 
 	// Rutas protegidas de autenticación (aplicamos middleware individualmente)
 	api.Get("/auth/me", middleware.AuthMiddleware(), authHandler.GetMe)
-	api.Put("/auth/profile", middleware.AuthMiddleware(), authHandler.UpdateProfile) // Actualizar perfil
+	api.Put("/auth/profile", middleware.AuthMiddleware(), authHandler.UpdateProfile)              // Actualizar perfil
 	api.Put("/auth/datos-publicos", middleware.AuthMiddleware(), authHandler.UpdateDatosPublicos) // Actualizar datos públicos
 
 	// Ruta de completar perfil de Google (protegida - requiere token)
@@ -176,8 +176,8 @@ func main() {
 
 	// Rutas de administración (protegidas - requieren rol de admin)
 	admin := api.Group("/admin")
-	admin.Use(middleware.AuthMiddleware())      // Primero verificar autenticación
-	admin.Use(middleware.AdminMiddleware())      // Luego verificar rol de admin
+	admin.Use(middleware.AuthMiddleware())  // Primero verificar autenticación
+	admin.Use(middleware.AdminMiddleware()) // Luego verificar rol de admin
 
 	// Rutas de gestión de usuarios
 	if userHandler != nil {
@@ -241,17 +241,17 @@ func main() {
 		// Las rutas MÁS ESPECÍFICAS deben ir ANTES que las rutas con parámetros.
 
 		// Rutas ESPECÍFICAS (protegidas) - van primero
-		api.Get("/properties/my", middleware.AuthMiddleware(), propertyHandler.GetUserProperties)         // Mis propiedades (requiere login)
+		api.Get("/properties/my", middleware.AuthMiddleware(), propertyHandler.GetUserProperties)              // Mis propiedades (requiere login)
 		api.Patch("/properties/:id/status", middleware.AuthMiddleware(), propertyHandler.UpdatePropertyStatus) // Actualizar estado (requiere login)
 
 		// Rutas PÚBLICAS (van después)
-		api.Get("/properties", propertyHandler.ListProperties)              // Listar propiedades (público)
-		api.Get("/properties/search", propertyHandler.SearchProperties)    // Búsqueda full-text (público)
-		api.Get("/properties/:id", propertyHandler.GetProperty)            // Ver detalle de propiedad (público)
+		api.Get("/properties", propertyHandler.ListProperties)          // Listar propiedades (público)
+		api.Get("/properties/search", propertyHandler.SearchProperties) // Búsqueda full-text (público)
+		api.Get("/properties/:id", propertyHandler.GetProperty)         // Ver detalle de propiedad (público)
 
 		// Rutas protegidas restantes
-		api.Post("/properties", middleware.AuthMiddleware(), propertyHandler.CreateProperty)              // Crear propiedad (requiere login)
-		api.Delete("/properties/:id", middleware.AuthMiddleware(), propertyHandler.DeleteProperty)        // Eliminar propiedad (requiere login)
+		api.Post("/properties", middleware.AuthMiddleware(), propertyHandler.CreateProperty)       // Crear propiedad (requiere login)
+		api.Delete("/properties/:id", middleware.AuthMiddleware(), propertyHandler.DeleteProperty) // Eliminar propiedad (requiere login)
 	}
 
 	// 🚀 WebSocket para actualizaciones en tiempo real
