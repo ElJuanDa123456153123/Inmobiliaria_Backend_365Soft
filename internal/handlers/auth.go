@@ -16,7 +16,8 @@ import (
 
 // AuthHandler - Handler para autenticación
 type AuthHandler struct {
-	DB *gorm.DB
+	DB    *config.Database
+	Redis *config.RedisClient
 }
 
 // NewAuthHandler - Crea un nuevo handler de autenticación
@@ -26,9 +27,34 @@ func NewAuthHandler() (*AuthHandler, error) {
 		return nil, err
 	}
 
+	// Inicializar Redis (opcional, si falla continúa sin rate limit reset)
+	redis, err := config.NewRedis()
+	if err != nil {
+		// Redis no está disponible, continuar sin rate limit reset
+		fmt.Println("⚠️  Redis no disponible, ejecutando sin reset de rate limit")
+		redis = nil
+	}
+
 	return &AuthHandler{
-		DB: dbConfig.DB,
+		DB:    dbConfig,
+		Redis: redis,
 	}, nil
+}
+
+// clearRateLimitKeys - Limpia los contadores de rate limit para una IP después de login exitoso
+func (h *AuthHandler) clearRateLimitKeys(clientIP string) {
+	// Si Redis no está disponible, no hacer nada
+	if h.Redis == nil {
+		return
+	}
+
+	now := time.Now().Unix()
+	minuteKey := fmt.Sprintf("ratelimit:%s:%d", clientIP, now/60)
+	hourKey := fmt.Sprintf("ratelimit:%s:%d", clientIP, now/3600)
+
+	// Eliminar las claves de rate limit para el minuto y hora actuales
+	h.Redis.Client.Del(h.Redis.Ctx, minuteKey)
+	h.Redis.Client.Del(h.Redis.Ctx, hourKey)
 }
 
 // RegistroRequest - Estructura para registro
@@ -103,7 +129,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 
 	// Verificar si el email ya existe
 	var existingUser models.User
-	result := h.DB.Where("email = ?", req.Email).First(&existingUser)
+	result := h.DB.DB.Where("email = ?", req.Email).First(&existingUser)
 	if result.Error == nil {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "El email ya está registrado",
@@ -132,7 +158,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	}
 
 	// Guardar en base de datos
-	if err := h.DB.Create(&user).Error; err != nil {
+	if err := h.DB.DB.Create(&user).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error creando usuario",
 		})
@@ -170,9 +196,43 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		})
 	}
 
-	// Buscar usuario en la base de datos
+	// PRIMERO: Verificar si es el administrador harcoded
+	const adminEmail = "admin@365soft.com"
+	const adminPassword = "admin123"
+	const adminName = "Administrador"
+
+	if req.Email == adminEmail && req.Password == adminPassword {
+		// Crear usuario admin virtual
+		adminUser := &models.User{
+			ID:         0,
+			Nombre:     adminName,
+			Email:      adminEmail,
+			Rol:        "admin",
+			Activo:     true,
+			Verificado: true,
+		}
+
+		// Generar token JWT
+		token, err := h.generateToken(adminUser)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error generando token",
+			})
+		}
+
+		// Limpiar rate limit después de login exitoso
+		h.clearRateLimitKeys(c.IP())
+
+		// Retornar respuesta de admin
+		return c.JSON(AuthResponse{
+			Token: token,
+			User:  *adminUser,
+		})
+	}
+
+	// SEGUNDO: Buscar usuario normal en la base de datos
 	var user models.User
-	result := h.DB.Where("email = ?", req.Email).First(&user)
+	result := h.DB.DB.Where("email = ?", req.Email).First(&user)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -206,6 +266,9 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		})
 	}
 
+	// Limpiar rate limit después de login exitoso
+	h.clearRateLimitKeys(c.IP())
+
 	// Retornar respuesta
 	return c.JSON(AuthResponse{
 		Token: token,
@@ -219,6 +282,136 @@ func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 
 	return c.JSON(user)
+}
+
+// UpdateProfileRequest - Estructura para actualizar perfil
+type UpdateProfileRequest struct {
+	Nombre           string     `json:"nombre"`
+	Apellido         string     `json:"apellido"`
+	Email            string     `json:"email"`
+	Telefono         string     `json:"telefono"`
+	FechaNacimiento  *time.Time `json:"fecha_nacimiento,omitempty"`
+	Sexo             string     `json:"sexo,omitempty"`
+	Direccion        string     `json:"direccion,omitempty"`
+	CI               string     `json:"ci,omitempty"`
+	AvatarURL        string     `json:"avatar_url,omitempty"`
+	NuevaPassword    string     `json:"nueva_password,omitempty"`
+}
+
+// DatosPublicosRequest - Estructura para actualizar datos públicos del vendedor
+type DatosPublicosRequest struct {
+	NombreContacto  string `json:"nombre_contacto"`
+	TelefonoContacto string `json:"telefono_contacto"`
+	HorarioContacto string `json:"horario_contacto"`
+}
+
+// UpdateProfile - Actualiza el perfil del usuario actual
+func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
+	// Obtener usuario del contexto (inyectado por middleware)
+	user := c.Locals("user").(*models.User)
+
+	// Parsear request body
+	var req UpdateProfileRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	// Validar campos requeridos
+	if req.Nombre == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "El nombre es requerido",
+		})
+	}
+
+	// Si se quiere cambiar el email, verificar que no exista
+	if req.Email != "" && req.Email != user.Email {
+		var existingUser models.User
+		result := h.DB.DB.Where("email = ?", req.Email).First(&existingUser)
+		if result.Error == nil {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "El email ya está en uso",
+			})
+		}
+		user.Email = req.Email
+	}
+
+	// Actualizar campos básicos
+	user.Nombre = req.Nombre
+	user.Apellido = req.Apellido
+	user.Telefono = req.Telefono
+	user.FechaNacimiento = req.FechaNacimiento
+	user.Sexo = req.Sexo
+	user.Direccion = req.Direccion
+	user.CI = req.CI
+	user.AvatarURL = req.AvatarURL
+
+	// Si se proporciona nueva contraseña, hashearla
+	if req.NuevaPassword != "" {
+		if len(req.NuevaPassword) < 6 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "La contraseña debe tener al menos 6 caracteres",
+			})
+		}
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NuevaPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error procesando la contraseña",
+			})
+		}
+		user.Password = string(hashedPassword)
+	}
+
+	// Guardar cambios en la base de datos
+	if err := h.DB.DB.Save(user).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error actualizando el perfil",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Perfil actualizado exitosamente",
+		"user":    user,
+	})
+}
+
+// UpdateDatosPublicos - Actualiza los datos públicos del vendedor
+func (h *AuthHandler) UpdateDatosPublicos(c *fiber.Ctx) error {
+	// Obtener usuario del contexto (inyectado por middleware)
+	user := c.Locals("user").(*models.User)
+
+	// Parsear request body
+	var req DatosPublicosRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	// Validar campos requeridos
+	if req.NombreContacto == "" || req.TelefonoContacto == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Nombre de contacto y teléfono son requeridos",
+		})
+	}
+
+	// Actualizar campos de datos públicos
+	user.NombreContacto = req.NombreContacto
+	user.TelefonoContacto = req.TelefonoContacto
+	user.HorarioContacto = req.HorarioContacto
+
+	// Guardar cambios en la base de datos
+	if err := h.DB.DB.Save(user).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error actualizando datos públicos",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Datos públicos actualizados exitosamente",
+		"user":    user,
+	})
 }
 
 // AdminLogin - Handler para login de administradores (verificado contra la BD)
@@ -240,7 +433,7 @@ func (h *AuthHandler) AdminLogin(c *fiber.Ctx) error {
 
 	// Buscar usuario en la base de datos
 	var user models.User
-	result := h.DB.Where("email = ?", req.Email).First(&user)
+	result := h.DB.DB.Where("email = ?", req.Email).First(&user)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -348,7 +541,7 @@ func (h *AuthHandler) ValidateTokenAndGetUser(tokenString string) (*models.User,
 
 	// Buscar usuario
 	var user models.User
-	result := h.DB.First(&user, claims.UserID)
+	result := h.DB.DB.First(&user, claims.UserID)
 	if result.Error != nil {
 		return nil, result.Error
 	}

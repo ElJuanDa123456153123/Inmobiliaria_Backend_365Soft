@@ -7,11 +7,11 @@ import (
 	"log"
 	"os"
 
+	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"gorm.io/gorm"
 )
 
 // GoogleUserInfo - Estructura para respuesta de Google
@@ -27,7 +27,7 @@ type GoogleUserInfo struct {
 
 // GoogleAuthHandler - Handler para autenticación con Google
 type GoogleAuthHandler struct {
-	DB        *gorm.DB
+	DB        *config.Database
 	OAuthConf *oauth2.Config
 }
 
@@ -120,7 +120,7 @@ func (h *GoogleAuthHandler) GoogleCallback(c *fiber.Ctx) error {
 
 	// Buscar o crear usuario
 	var user models.User
-	result := h.DB.Where("email = ?", googleUser.Email).First(&user)
+	result := h.DB.DB.Where("email = ?", googleUser.Email).First(&user)
 
 	if result.Error != nil {
 		// Usuario no existe, crear nuevo
@@ -134,7 +134,7 @@ func (h *GoogleAuthHandler) GoogleCallback(c *fiber.Ctx) error {
 			Password:   "", // No tiene password (solo Google)
 		}
 
-		if err := h.DB.Create(&user).Error; err != nil {
+		if err := h.DB.DB.Create(&user).Error; err != nil {
 			log.Printf("Error creando usuario: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Error creando usuario",
@@ -144,7 +144,7 @@ func (h *GoogleAuthHandler) GoogleCallback(c *fiber.Ctx) error {
 		// Usuario existe, actualizar información
 		user.Nombre = googleUser.Name
 		user.Verificado = googleUser.VerifiedEmail
-		if err := h.DB.Save(&user).Error; err != nil {
+		if err := h.DB.DB.Save(&user).Error; err != nil {
 			log.Printf("Error actualizando usuario: %v", err)
 		}
 	}
@@ -238,7 +238,7 @@ func (h *GoogleAuthHandler) CompleteGoogleProfile(c *fiber.Ctx) error {
 		}
 	}
 
-	if err := h.DB.Save(user).Error; err != nil {
+	if err := h.DB.DB.Save(user).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error actualizando usuario",
 		})

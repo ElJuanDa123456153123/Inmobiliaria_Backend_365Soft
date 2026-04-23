@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/models"
 	"github.com/gofiber/fiber/v2"
@@ -10,7 +12,7 @@ import (
 
 // AdminHandler - Handler para administración
 type AdminHandler struct {
-	DB *gorm.DB
+	DB *config.Database
 }
 
 // NewAdminHandler - Crea un nuevo handler de administración
@@ -21,7 +23,7 @@ func NewAdminHandler() (*AdminHandler, error) {
 	}
 
 	return &AdminHandler{
-		DB: dbConfig.DB,
+		DB: dbConfig,
 	}, nil
 }
 
@@ -29,7 +31,17 @@ func NewAdminHandler() (*AdminHandler, error) {
 func (h *AdminHandler) GetUsers(c *fiber.Ctx) error {
 	var users []models.User
 
-	if err := h.DB.Find(&users).Error; err != nil {
+	// Crear nueva conexión por cada request (evita database closed)
+	db, err := config.NewDatabase()
+	if err != nil {
+		fmt.Printf("❌ ERROR creando conexión: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	if err := db.DB.Find(&users).Error; err != nil {
+		fmt.Printf("❌ ERROR en consulta: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error obteniendo usuarios",
 		})
@@ -54,6 +66,13 @@ type CreateUserRequest struct {
 
 // CreateUser - Crea un nuevo usuario (Admin access)
 func (h *AdminHandler) CreateUser(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
 	var req CreateUserRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -70,7 +89,7 @@ func (h *AdminHandler) CreateUser(c *fiber.Ctx) error {
 
 	// Verificar si el email ya existe
 	var existingUser models.User
-	if err := h.DB.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
+	if err := db.DB.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "El email ya está registrado",
 		})
@@ -101,7 +120,7 @@ func (h *AdminHandler) CreateUser(c *fiber.Ctx) error {
 		Verificado:         true, // Creado por admin se asume verificado
 	}
 
-	if err := h.DB.Create(&user).Error; err != nil {
+	if err := db.DB.Create(&user).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error creando el usuario",
 		})
@@ -127,6 +146,13 @@ type UpdateUserRequest struct {
 
 // UpdateUser - Actualiza un usuario existente
 func (h *AdminHandler) UpdateUser(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
 	userID := c.Params("id")
 	if userID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -143,7 +169,7 @@ func (h *AdminHandler) UpdateUser(c *fiber.Ctx) error {
 
 	// Buscar el usuario existente
 	var user models.User
-	if err := h.DB.First(&user, userID).Error; err != nil {
+	if err := db.DB.First(&user, userID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "Usuario no encontrado",
@@ -157,7 +183,7 @@ func (h *AdminHandler) UpdateUser(c *fiber.Ctx) error {
 	// Verificar si el email es diferente y que el nuevo no esté usado
 	if req.Email != "" && req.Email != user.Email {
 		var count int64
-		h.DB.Model(&models.User{}).Where("email = ? AND id != ?", req.Email, user.ID).Count(&count)
+		h.DB.DB.Model(&models.User{}).Where("email = ? AND id != ?", req.Email, user.ID).Count(&count)
 		if count > 0 {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"error": "El email ingresado ya está en uso por otro usuario",
@@ -202,7 +228,7 @@ func (h *AdminHandler) UpdateUser(c *fiber.Ctx) error {
 	}
 
 	// Guardar los cambios
-	if err := h.DB.Save(&user).Error; err != nil {
+	if err := db.DB.Save(&user).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error actualizando el usuario",
 		})
@@ -216,6 +242,13 @@ func (h *AdminHandler) UpdateUser(c *fiber.Ctx) error {
 
 // ToggleUserActive - Activa/desactiva un usuario
 func (h *AdminHandler) ToggleUserActive(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
 	// Obtener ID del usuario
 	userID := c.Params("id")
 	if userID == "" {
@@ -226,7 +259,7 @@ func (h *AdminHandler) ToggleUserActive(c *fiber.Ctx) error {
 
 	// Buscar usuario
 	var user models.User
-	if err := h.DB.First(&user, userID).Error; err != nil {
+	if err := db.DB.First(&user, userID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "Usuario no encontrado",
@@ -241,7 +274,7 @@ func (h *AdminHandler) ToggleUserActive(c *fiber.Ctx) error {
 	user.Activo = !user.Activo
 
 	// Guardar cambios
-	if err := h.DB.Save(&user).Error; err != nil {
+	if err := db.DB.Save(&user).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error actualizando usuario",
 		})
@@ -255,6 +288,13 @@ func (h *AdminHandler) ToggleUserActive(c *fiber.Ctx) error {
 
 // DeleteUser - Elimina un usuario
 func (h *AdminHandler) DeleteUser(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
 	// Obtener ID del usuario
 	userID := c.Params("id")
 	if userID == "" {
@@ -264,7 +304,7 @@ func (h *AdminHandler) DeleteUser(c *fiber.Ctx) error {
 	}
 
 	// Eliminar usuario
-	if err := h.DB.Delete(&models.User{}, userID).Error; err != nil {
+	if err := db.DB.Delete(&models.User{}, userID).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error eliminando usuario",
 		})

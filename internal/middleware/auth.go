@@ -15,6 +15,11 @@ import (
 // AuthMiddleware - Middleware de autenticación JWT
 func AuthMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin autenticación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
 		// Obtener token del header Authorization
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
@@ -59,25 +64,38 @@ func AuthMiddleware() fiber.Handler {
 			})
 		}
 
-			// Buscar usuario en la base de datos
-		dbConfig, err := config.NewDatabase()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error conectando a la base de datos",
-			})
-		}
-
 		var user models.User
-		result := dbConfig.DB.First(&user, uint(userID))
-		if result.Error != nil {
-			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"error": "Usuario no encontrado",
+
+		// Si userID es 0, es el admin harcodeado
+		if userID == 0 {
+			user = models.User{
+				ID:         0,
+				Nombre:     "Administrador",
+				Email:      "admin@365soft.com",
+				Rol:        "admin",
+				Activo:     true,
+				Verificado: true,
+			}
+		} else {
+			// Buscar usuario en la base de datos
+			dbConfig, err := config.NewDatabase()
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Error conectando a la base de datos",
 				})
 			}
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error buscando usuario",
-			})
+
+			result := dbConfig.DB.First(&user, uint(userID))
+			if result.Error != nil {
+				if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+					return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+						"error": "Usuario no encontrado",
+					})
+				}
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Error buscando usuario",
+				})
+			}
 		}
 
 		// Verificar si el usuario está activo
@@ -99,6 +117,12 @@ func AuthMiddleware() fiber.Handler {
 // AdminMiddleware - Middleware para verificar rol de administrador
 func AdminMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin verificación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
+		// Obtener usuario del contexto (inyectado por AuthMiddleware)
 		user, ok := c.Locals("user").(*models.User)
 		if !ok || user == nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
