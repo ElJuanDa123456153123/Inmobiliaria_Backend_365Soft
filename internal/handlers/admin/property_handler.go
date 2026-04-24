@@ -79,7 +79,8 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 	query := db.DB.Model(&models.Property{}).
 		Preload("User").
 		Preload("PropertyImages").
-		Preload("Advisor")
+		Preload("Advisor").
+		Preload("PropertyAdvisors.Advisor") // Incluir múltiples asesores asignados
 
 	// Filtros
 	if estado != "" {

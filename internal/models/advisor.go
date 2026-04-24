@@ -19,10 +19,14 @@ type Advisor struct {
 	Telefono     string  `gorm:"size:30" json:"telefono"`
 	Especialidad string  `gorm:"size:100" json:"especialidad"` // Ej: "Lujo", "Venta", "Alquiler"
 
+	// Foto de perfil del asesor (URL o base64)
+	ImagenURL string `gorm:"type:text" json:"imagen_url,omitempty"`
+
 	// Estado
 	Activo bool `gorm:"default:true" json:"activo"`
 
 	// Relaciones
+	// Nota: AdvisorID se mantiene por compatibilidad, pero ahora también soportamos múltiples asesores
 	Propiedades []Property `gorm:"foreignKey:AdvisorID" json:"propiedades,omitempty"`
 }
 

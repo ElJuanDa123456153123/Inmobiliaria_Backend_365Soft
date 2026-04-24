@@ -52,7 +52,7 @@ func (r *PropertyRepository) GetByIDWithUser(id uint) (*models.Property, error) 
 	return &property, nil
 }
 
-// GetByIDWithRelations - Obtiene una propiedad por ID con todas sus relaciones (User, PropertyImages, Advisor)
+// GetByIDWithRelations - Obtiene una propiedad por ID con todas sus relaciones (User, PropertyImages, Advisor, PropertyAdvisors)
 func (r *PropertyRepository) GetByIDWithRelations(id uint) (*models.Property, error) {
 	var property models.Property
 	err := r.DB.DB.
@@ -61,6 +61,7 @@ func (r *PropertyRepository) GetByIDWithRelations(id uint) (*models.Property, er
 			return db.Order("orden ASC")
 		}).
 		Preload("Advisor").
+		Preload("PropertyAdvisors.Advisor"). // Incluir múltiples asesores asignados
 		First(&property, id).Error
 	if err != nil {
 		return nil, err

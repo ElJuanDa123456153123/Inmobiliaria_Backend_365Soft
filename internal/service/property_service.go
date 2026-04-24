@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/models"
@@ -85,9 +86,26 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 	}
 
 	// Obtener usuario para guardar datos del vendedor
-	user, err := s.UserRepo.GetByID(req.UserID)
-	if err != nil {
-		return nil, errors.UserNotFound(req.UserID)
+	// Si el userID es 0, es el admin harcodeado (no está en BD)
+	var user *models.User
+	if req.UserID == 0 {
+		// Admin harcodeado
+		user = &models.User{
+			ID:         0,
+			Nombre:     "Administrador",
+			Apellido:   "Sistema",
+			Email:      "admin@365soft.com",
+			Rol:        models.RoleAdmin,
+			Activo:     true,
+			Verificado:  true,
+		}
+	} else {
+		// Buscar usuario en la base de datos
+		var err error
+		user, err = s.UserRepo.GetByID(req.UserID)
+		if err != nil {
+			return nil, errors.UserNotFound(req.UserID)
+		}
 	}
 
 	// 🔒 Sanitización HTML (se hace en el handler, pero podría hacerse aquí también)
@@ -261,10 +279,32 @@ func (s *PropertyService) DeleteProperty(req *DeletePropertyRequest) error {
 
 // DeletePropertyAdmin - Elimina una propiedad (admin) - sin verificar dueño
 func (s *PropertyService) DeletePropertyAdmin(propertyID uint) error {
-	// Obtener propiedad
-	property, err := s.PropertyRepo.GetByID(propertyID)
+	// Obtener propiedad con imágenes
+	property, err := s.PropertyRepo.GetByIDWithRelations(propertyID)
 	if err != nil {
 		return errors.PropertyNotFound(propertyID)
+	}
+
+	// 🔒 Eliminar imágenes físicas antes de soft delete
+	if len(property.PropertyImages) > 0 {
+		for _, img := range property.PropertyImages {
+			imagePath := fmt.Sprintf("uploads/imagenes/%s", extractFilenameFromURL(img.ImageURL))
+			thumbnailPath := fmt.Sprintf("uploads/imagenes/%s", extractThumbnailFilenameFromURL(img.ImageURL))
+
+			// Eliminar imagen principal
+			if err := os.Remove(imagePath); err != nil && !os.IsNotExist(err) {
+				fmt.Printf("⚠️  Error eliminando imagen %s: %v\n", imagePath, err)
+			} else {
+				fmt.Printf("✅ Imagen eliminada: %s\n", imagePath)
+			}
+
+			// Eliminar thumbnail
+			if err := os.Remove(thumbnailPath); err != nil && !os.IsNotExist(err) {
+				fmt.Printf("⚠️  Error eliminando thumbnail %s: %v\n", thumbnailPath, err)
+			} else {
+				fmt.Printf("✅ Thumbnail eliminado: %s\n", thumbnailPath)
+			}
+		}
 	}
 
 	// Soft delete sin verificar dueño (admin puede eliminar cualquier propiedad)
@@ -683,4 +723,31 @@ func (s *PropertyService) AssignAdvisor(id uint, advisorID *uint) (*models.Prope
 	}
 
 	return property, nil
+}
+
+// Helper functions para extraer nombre de archivo de URL
+func extractFilenameFromURL(imageURL string) string {
+	// La URL viene en formato /api/imagenes/propiedad-123-456.png
+	// Necesitamos extraer solo el filename
+	runes := []rune(imageURL)
+	for i := len(runes) - 1; i >= 0; i-- {
+		if runes[i] == '/' {
+			return string(runes[i+1:])
+		}
+	}
+	return imageURL
+}
+
+// extractThumbnailFilenameFromURL - Genera el nombre del thumbnail
+// propiedad-123-456.png -> propiedad-123-456-thumb.png
+func extractThumbnailFilenameFromURL(imageURL string) string {
+	filename := extractFilenameFromURL(imageURL)
+	// Agregar -thumb antes de la extensión
+	runes := []rune(filename)
+	for i := len(runes) - 1; i >= 0; i-- {
+		if runes[i] == '.' {
+			return string(runes[:i]) + "-thumb" + string(runes[i:])
+		}
+	}
+	return filename + "-thumb"
 }

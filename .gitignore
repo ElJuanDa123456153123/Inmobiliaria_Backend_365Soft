@@ -66,3 +66,6 @@ Desktop.ini
 
 # Archivos específicos del proyecto
 nul
+
+# Archivos subidos por usuarios
+uploads/

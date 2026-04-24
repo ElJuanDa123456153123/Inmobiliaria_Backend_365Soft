@@ -52,9 +52,12 @@ type Property struct {
 	// Imágenes de la propiedad
 	PropertyImages []PropertyImage `gorm:"foreignKey:PropertyID" json:"imagenes,omitempty"`
 
-	// Asesor asignado a la propiedad (opcional)
+	// Asesor asignado a la propiedad (opcional) - MANTENIDO POR COMPATIBILIDAD
 	AdvisorID *uint    `gorm:"index" json:"advisor_id,omitempty"`
 	Advisor   *Advisor `gorm:"foreignKey:AdvisorID" json:"advisor,omitempty"`
+
+	// Múltiples asesores asignados a la propiedad (relación muchos a muchos)
+	PropertyAdvisors []PropertyAdvisor `gorm:"foreignKey:PropertyID" json:"asesores_asignados,omitempty"`
 
 	// === DATOS DE LA OPERACIÓN (PASO 1) ===
 	Titulo          string        `gorm:"size:200;not null" json:"titulo"`
@@ -143,4 +146,26 @@ type PropertyImage struct {
 // TableName - Especifica el nombre de la tabla en PostgreSQL
 func (PropertyImage) TableName() string {
 	return "propiedades_imagenes"
+}
+
+// PropertyAdvisor - Modelo de unión para relación muchos a muchos entre Propiedades y Asesores
+// Permite asignar múltiples asesores a una propiedad
+type PropertyAdvisor struct {
+	ID        uint           `gorm:"primaryKey" json:"id"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+
+	// Propiedad
+	PropertyID uint `gorm:"not null;index" json:"property_id"`
+	Property   Property `gorm:"foreignKey:PropertyID" json:"-"`
+
+	// Asesor
+	AdvisorID uint `gorm:"not null;index" json:"advisor_id"`
+	Advisor   Advisor `gorm:"foreignKey:AdvisorID" json:"asesor,omitempty"`
+}
+
+// TableName - Especifica el nombre de la tabla en PostgreSQL
+func (PropertyAdvisor) TableName() string {
+	return "propiedades_asesores"
 }
