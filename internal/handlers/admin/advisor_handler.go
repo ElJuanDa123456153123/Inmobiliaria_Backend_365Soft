@@ -122,6 +122,7 @@ type CreateAdvisorRequest struct {
 	Email        string `json:"email"`
 	Telefono     string `json:"telefono"`
 	Especialidad string `json:"especialidad"`
+	ImagenURL    string `json:"imagen_url,omitempty"` // URL de la foto de perfil
 	Activo       *bool  `json:"activo"`
 }
 
@@ -167,6 +168,7 @@ func (h *AdvisorHandler) CreateAdvisor(c *fiber.Ctx) error {
 		Email:        req.Email,
 		Telefono:     req.Telefono,
 		Especialidad: req.Especialidad,
+		ImagenURL:    req.ImagenURL,
 		Activo:       activo,
 	}
 
@@ -189,6 +191,7 @@ type UpdateAdvisorRequest struct {
 	Email        string `json:"email"`
 	Telefono     string `json:"telefono"`
 	Especialidad string `json:"especialidad"`
+	ImagenURL    string `json:"imagen_url,omitempty"` // URL de la foto de perfil
 	Activo       *bool  `json:"activo"`
 }
 
@@ -246,6 +249,8 @@ func (h *AdvisorHandler) UpdateAdvisor(c *fiber.Ctx) error {
 	if req.Especialidad != "" {
 		advisor.Especialidad = req.Especialidad
 	}
+	// ImagenURL se puede actualizar (incluso a vacío para eliminar)
+	advisor.ImagenURL = req.ImagenURL
 	if req.Activo != nil {
 		advisor.Activo = *req.Activo
 	}
@@ -344,3 +349,147 @@ func (h *AdvisorHandler) ToggleAdvisorActive(c *fiber.Ctx) error {
 		"advisor": advisor,
 	})
 }
+
+// ========== NUEVOS ENDPOINTS PARA MÚLTIPLES ASESORES POR PROPIEDAD ==========
+
+// GetPropertyAdvisors - Obtiene todos los asesores asignados a una propiedad
+func (h *AdvisorHandler) GetPropertyAdvisors(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	propertyID := c.Params("id")
+
+	// Obtener las relaciones PropertyAdvisor
+	var propertyAdvisors []models.PropertyAdvisor
+	if err := db.DB.Where("property_id = ?", propertyID).
+		Preload("Advisor").
+		Find(&propertyAdvisors).Error; err != nil {
+		fmt.Printf("❌ ERROR obteniendo asesores de propiedad: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo asesores asignados",
+		})
+	}
+
+	// Extraer solo los asesores
+	advisors := make([]models.Advisor, 0, len(propertyAdvisors))
+	for _, pa := range propertyAdvisors {
+		advisors = append(advisors, pa.Advisor)
+	}
+
+	return c.JSON(fiber.Map{
+		"advisors": advisors,
+		"total":    len(advisors),
+	})
+}
+
+// AssignAdvisorToProperty - Asigna un asesor a una propiedad (soporta múltiples)
+func (h *AdvisorHandler) AssignAdvisorToProperty(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	propertyID := c.Params("id")
+
+	var req struct {
+		AdvisorID uint `json:"advisor_id"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	if req.AdvisorID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "advisor_id es requerido",
+		})
+	}
+
+	// Verificar que la propiedad existe
+	var property models.Property
+	if err := db.DB.First(&property, propertyID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Propiedad no encontrada",
+		})
+	}
+
+	// Verificar que el asesor existe
+	var advisor models.Advisor
+	if err := db.DB.First(&advisor, req.AdvisorID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Asesor no encontrado",
+		})
+	}
+
+	// Verificar si ya está asignado
+	var existingAssignment models.PropertyAdvisor
+	err = db.DB.Where("property_id = ? AND advisor_id = ?", propertyID, req.AdvisorID).
+		First(&existingAssignment).Error
+
+	if err == nil {
+		// Ya existe la asignación
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "El asesor ya está asignado a esta propiedad",
+		})
+	}
+
+	// Crear la asignación
+	assignment := models.PropertyAdvisor{
+		PropertyID: property.ID,
+		AdvisorID:  advisor.ID,
+	}
+
+	if err := db.DB.Create(&assignment).Error; err != nil {
+		fmt.Printf("❌ ERROR asignando asesor: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error asignando asesor a la propiedad",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Asesor asignado exitosamente",
+		"advisor": advisor,
+	})
+}
+
+// RemoveAdvisorFromProperty - Elimina un asesor de una propiedad
+func (h *AdvisorHandler) RemoveAdvisorFromProperty(c *fiber.Ctx) error {
+	db, err := config.NewDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	propertyID := c.Params("id")
+	advisorID := c.Params("advisorId")
+
+	// Buscar la asignación
+	var assignment models.PropertyAdvisor
+	if err := db.DB.Where("property_id = ? AND advisor_id = ?", propertyID, advisorID).
+		First(&assignment).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Asignación no encontrada",
+		})
+	}
+
+	// Eliminar la asignación
+	if err := db.DB.Delete(&assignment).Error; err != nil {
+		fmt.Printf("❌ ERROR eliminando asignación: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error eliminando asesor de la propiedad",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Asesor eliminado de la propiedad exitosamente",
+	})
+}
+

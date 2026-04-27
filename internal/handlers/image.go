@@ -26,15 +26,20 @@ func NewImageHandler() (*ImageHandler, error) {
 	return &ImageHandler{}, nil
 }
 
-// UploadImage - Sube una imagen y la guarda como .webp
+// UploadImage - Sube una imagen y la guarda como PNG
 func (h *ImageHandler) UploadImage(c *fiber.Ctx) error {
+	fmt.Println("📤 UploadImage llamado")
+
 	// Obtener archivo del formulario
 	file, err := c.FormFile("image")
 	if err != nil {
+		fmt.Printf("❌ Error obteniendo archivo del formulario: %v\n", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "No se proporcionó ninguna imagen",
 		})
 	}
+
+	fmt.Printf("✅ Archivo recibido: %s (tamaño: %d bytes)\n", file.Filename, file.Size)
 
 	// Validar tamaño máximo (10MB)
 	const maxFileSize = 10 * 1024 * 1024
@@ -71,8 +76,13 @@ func (h *ImageHandler) UploadImage(c *fiber.Ctx) error {
 	// Crear directorio de uploads si no existe
 	uploadDir := "uploads/imagenes"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		// Log del error para debugging
+		fmt.Printf("❌ Error creando directorio '%s': %v\n", uploadDir, err)
+
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Error al crear directorio de uploads",
+			"error": fmt.Sprintf("Error al crear directorio de uploads: %s. Asegúrate de que la aplicación tiene permisos de escritura.", uploadDir),
+			"detailed_error": err.Error(),
+			"upload_dir": uploadDir,
 		})
 	}
 
@@ -92,7 +102,7 @@ func (h *ImageHandler) UploadImage(c *fiber.Ctx) error {
 		optimizedImg = img
 	}
 
-	// Guardar imagen optimizada
+	// Guardar imagen optimizada como PNG
 	out, err := os.Create(filepath)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -107,7 +117,7 @@ func (h *ImageHandler) UploadImage(c *fiber.Ctx) error {
 		})
 	}
 
-	// 🔒 Generar thumbnail (300x300)
+	// 🔒 Generar thumbnail (300x300) también como PNG
 	thumbnail := imaging.Thumbnail(optimizedImg, 300, 300, imaging.Lanczos)
 	thumbOut, err := os.Create(thumbnailPath)
 	if err != nil {
@@ -125,6 +135,9 @@ func (h *ImageHandler) UploadImage(c *fiber.Ctx) error {
 
 	// Retornar la URL de la imagen
 	imageURL := fmt.Sprintf("/api/imagenes/%s", filename)
+
+	fmt.Printf("✅ Imagen guardada exitosamente: %s\n", filepath)
+	fmt.Printf("✅ Thumbnail guardado: %s\n", thumbnailPath)
 
 	return c.JSON(fiber.Map{
 		"message":    "Imagen subida exitosamente",
@@ -165,8 +178,13 @@ func (h *ImageHandler) UploadImagesFromBase64(c *fiber.Ctx) error {
 	// Crear directorio de uploads si no existe
 	uploadDir := "uploads/imagenes"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		// Log del error para debugging
+		fmt.Printf("❌ Error creando directorio '%s': %v\n", uploadDir, err)
+
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Error al crear directorio de uploads",
+			"error": fmt.Sprintf("Error al crear directorio de uploads: %s. Asegúrate de que la aplicación tiene permisos de escritura.", uploadDir),
+			"detailed_error": err.Error(),
+			"upload_dir": uploadDir,
 		})
 	}
 
@@ -197,7 +215,7 @@ func (h *ImageHandler) UploadImagesFromBase64(c *fiber.Ctx) error {
 		}
 
 		// Generar nombre único
-		filename := fmt.Sprintf("propiedad-%d-%d.webp", timestamp, i)
+		filename := fmt.Sprintf("propiedad-%d-%d.png", timestamp, i)
 		filepath := stdpath.Join(uploadDir, filename)
 
 		// Redimensionar si es muy grande
@@ -216,7 +234,7 @@ func (h *ImageHandler) UploadImagesFromBase64(c *fiber.Ctx) error {
 			})
 		}
 
-		// Codificar como PNG (cambiar a WebP real si tienes la librería)
+		// Codificar como PNG
 		if err := png.Encode(out, resizedImg); err != nil {
 			out.Close()
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -252,8 +270,13 @@ func (h *ImageHandler) ServeImage(c *fiber.Ctx) error {
 
 	// Verificar que el archivo existe
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+		// Log del error para debugging
+		fmt.Printf("⚠️  Imagen no encontrada: %s\n", filepath)
+
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "Imagen no encontrada",
+			"filename": filename,
+			"message": fmt.Sprintf("La imagen '%s' no existe en el servidor. Asegúrate de que la propiedad tenga imágenes cargadas.", filename),
 		})
 	}
 

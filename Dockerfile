@@ -23,7 +23,7 @@ FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
 
-WORKDIR /root/
+WORKDIR /app
 
 # Copiar el binario desde el builder
 COPY --from=builder /app/main .

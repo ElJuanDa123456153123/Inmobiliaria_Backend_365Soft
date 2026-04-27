@@ -2,9 +2,7 @@ package main
 
 import (
 	"log"
-	"time"
 
-	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/database"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers"
 	adminhandlers "github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers/admin"
@@ -38,23 +36,11 @@ func main() {
 	app.Use(middleware.SecurityHeadersMiddleware()) // Headers de seguridad
 	app.Use(middleware.ErrorHandlerMiddleware())  // Manejo centralizado de errores
 
-	// 🚀 Rate Limiting con Redis (si está disponible)
-	var redisClient *config.RedisClient
+	// 🚀 Redis disponible para rate limiting específico (login)
+	// NOTA: Rate limiting SOLO se aplica a endpoints específicos, no globalmente
 	propertyHandler, err := handlers.NewPropertyHandler()
 	if err == nil && propertyHandler.Redis != nil {
-		redisClient = propertyHandler.Redis
-		rateLimiter := middleware.NewRateLimiter(redisClient)
-
-		// Rate limiting estándar para todas las rutas
-		app.Use(rateLimiter.RateLimitMiddleware(middleware.RateLimitConfig{
-			RequestsPerMinute: 60,  // 60 requests por minuto por IP
-			RequestsPerHour:   1000, // 1000 por hora
-			BanDuration:       5 * time.Minute,
-		}))
-
-		// Rate limiting específico por endpoint
-		endpointLimits := middleware.GetStandardRateLimits()
-		app.Use(rateLimiter.RateLimitByEndpointsMiddleware(endpointLimits))
+		log.Println("✅ Redis conectado - Rate limiting disponible para endpoints específicos")
 	} else {
 		log.Println("⚠️  Rate limiting no disponible (Redis no conectado)")
 	}
@@ -213,16 +199,32 @@ func main() {
 	}
 
 	// Rutas de administración de propiedades
+	// IMPORTANTE: El orden de las rutas importa. Las rutas MÁS ESPECÍFICAS deben ir ANTES.
 	if adminPropertyHandler != nil {
+		// Rutas básicas (sin parámetros)
 		admin.Get("/properties", adminPropertyHandler.ListProperties)
-		admin.Get("/properties/stats", adminPropertyHandler.GetPropertiesStats)
-		admin.Get("/properties/:id", adminPropertyHandler.GetProperty)
 		admin.Post("/properties", adminPropertyHandler.CreateProperty)
+
+		// Rutas ESPECÍFICAS (van antes que /:id para evitar conflictos)
+		admin.Get("/properties/stats", adminPropertyHandler.GetPropertiesStats)
+
+		// Rutas con parámetro :id
+		admin.Get("/properties/:id", adminPropertyHandler.GetProperty)
 		admin.Put("/properties/:id", adminPropertyHandler.UpdateProperty)
+		admin.Delete("/properties/:id", adminPropertyHandler.DeleteProperty)
+
+		// Rutas con :id y sub-rutas (van después)
 		admin.Patch("/properties/:id/status", adminPropertyHandler.UpdatePropertyStatus)
 		admin.Patch("/properties/:id/featured", adminPropertyHandler.ToggleFeatured)
-		admin.Delete("/properties/:id", adminPropertyHandler.DeleteProperty)
 		admin.Patch("/properties/:id/advisor", adminPropertyHandler.AssignAdvisor)
+	}
+
+	// Rutas de asesores asignados a propiedades (van después de las rutas básicas de properties)
+	if advisorHandler != nil {
+		// Nuevas rutas para múltiples asesores por propiedad
+		admin.Get("/properties/:id/advisors", advisorHandler.GetPropertyAdvisors)
+		admin.Post("/properties/:id/advisors", advisorHandler.AssignAdvisorToProperty)
+		admin.Delete("/properties/:id/advisors/:advisorId", advisorHandler.RemoveAdvisorFromProperty)
 	}
 
 	// Rutas de imágenes (DEBEN IR ANTES que /properties/:id para evitar conflictos)
@@ -281,5 +283,34 @@ func main() {
 	if wsHandler != nil {
 		log.Println("  WS     /ws/properties          - Actualizaciones en tiempo real (WebSocket)")
 	}
+
+	// 🧹 Scheduler de limpieza de imágenes (DESHABILITADO - Ahora se eliminan inmediatamente)
+	// El job está comentado porque las imágenes se eliminan automáticamente al eliminar la propiedad
+	/*
+	retentionDays := 30 // Días de retención de imágenes
+	intervalHours := 24 // Ejecutar cada 24 horas
+
+	// Leer desde variables de entorno si existen
+	if rd := os.Getenv("IMAGE_CLEANUP_RETENTION_DAYS"); rd != "" {
+		if val, err := strconv.Atoi(rd); err == nil && val > 0 {
+			retentionDays = val
+		}
+	}
+	if ih := os.Getenv("IMAGE_CLEANUP_INTERVAL_HOURS"); ih != "" {
+		if val, err := strconv.Atoi(ih); err == nil && val > 0 {
+			intervalHours = val
+		}
+	}
+
+	// Iniciar job de limpieza en background
+	cleanupJob, err := jobs.NewCleanupJob()
+	if err != nil {
+		log.Printf("⚠️  Error iniciando job de limpieza: %v\n", err)
+	} else {
+		go cleanupJob.StartCleanupScheduler(retentionDays, intervalHours)
+		log.Printf("🧹 Job de limpieza iniciado: Retención=%d días, Intervalo=%d horas\n", retentionDays, intervalHours)
+	}
+	*/
+
 	log.Fatal(app.Listen(":3001"))
 }
