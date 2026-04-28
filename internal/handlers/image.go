@@ -6,8 +6,8 @@ import (
 	"fmt"
 	image "image"
 	_ "image/jpeg"
-	_ "image/png"
 	"image/png"
+	_ "image/png"
 	"io"
 	"os"
 	stdpath "path/filepath"
@@ -80,9 +80,9 @@ func (h *ImageHandler) UploadImage(c *fiber.Ctx) error {
 		fmt.Printf("❌ Error creando directorio '%s': %v\n", uploadDir, err)
 
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fmt.Sprintf("Error al crear directorio de uploads: %s. Asegúrate de que la aplicación tiene permisos de escritura.", uploadDir),
+			"error":          fmt.Sprintf("Error al crear directorio de uploads: %s. Asegúrate de que la aplicación tiene permisos de escritura.", uploadDir),
 			"detailed_error": err.Error(),
-			"upload_dir": uploadDir,
+			"upload_dir":     uploadDir,
 		})
 	}
 
@@ -140,12 +140,12 @@ func (h *ImageHandler) UploadImage(c *fiber.Ctx) error {
 	fmt.Printf("✅ Thumbnail guardado: %s\n", thumbnailPath)
 
 	return c.JSON(fiber.Map{
-		"message":    "Imagen subida exitosamente",
-		"url":        imageURL,
-		"filename":   filename,
-		"thumbnail":  fmt.Sprintf("/api/imagenes/%s", thumbnailName),
-		"width":      optimizedImg.Bounds().Dx(),
-		"height":     optimizedImg.Bounds().Dy(),
+		"message":   "Imagen subida exitosamente",
+		"url":       imageURL,
+		"filename":  filename,
+		"thumbnail": fmt.Sprintf("/api/imagenes/%s", thumbnailName),
+		"width":     optimizedImg.Bounds().Dx(),
+		"height":    optimizedImg.Bounds().Dy(),
 	})
 }
 
@@ -182,9 +182,9 @@ func (h *ImageHandler) UploadImagesFromBase64(c *fiber.Ctx) error {
 		fmt.Printf("❌ Error creando directorio '%s': %v\n", uploadDir, err)
 
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fmt.Sprintf("Error al crear directorio de uploads: %s. Asegúrate de que la aplicación tiene permisos de escritura.", uploadDir),
+			"error":          fmt.Sprintf("Error al crear directorio de uploads: %s. Asegúrate de que la aplicación tiene permisos de escritura.", uploadDir),
 			"detailed_error": err.Error(),
-			"upload_dir": uploadDir,
+			"upload_dir":     uploadDir,
 		})
 	}
 
@@ -274,9 +274,9 @@ func (h *ImageHandler) ServeImage(c *fiber.Ctx) error {
 		fmt.Printf("⚠️  Imagen no encontrada: %s\n", filepath)
 
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Imagen no encontrada",
+			"error":    "Imagen no encontrada",
 			"filename": filename,
-			"message": fmt.Sprintf("La imagen '%s' no existe en el servidor. Asegúrate de que la propiedad tenga imágenes cargadas.", filename),
+			"message":  fmt.Sprintf("La imagen '%s' no existe en el servidor. Asegúrate de que la propiedad tenga imágenes cargadas.", filename),
 		})
 	}
 

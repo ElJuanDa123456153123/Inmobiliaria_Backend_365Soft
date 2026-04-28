@@ -66,8 +66,14 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 	page := c.QueryInt("page", 1)
 	limit := c.QueryInt("limit", 20)
 	estado := c.Query("estado", "")
-	tipoOperacion := c.Query("tipo_operacion", "")
-	tipoPropiedad := c.Query("tipo_propiedad", "")
+	tipoOperacion := strings.ToLower(c.Query("tipo_operacion", c.Query("operation", "")))
+	tipoPropiedad := strings.ToLower(c.Query("tipo_propiedad", c.Query("propertyType", "")))
+	if tipoOperacion == "todas" || tipoOperacion == "todos" {
+		tipoOperacion = ""
+	}
+	if tipoPropiedad == "todas" || tipoPropiedad == "todos" {
+		tipoPropiedad = ""
+	}
 	zona := c.Query("zona", "")
 	userID := c.Query("user_id", "")
 	advisorID := c.Query("advisor_id", "")
@@ -107,9 +113,9 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 			searchTerm, searchTerm, searchTerm)
 	}
 
-	// Contar total
+	// Contar total (usando una sesión aislada)
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		fmt.Printf("❌ ERROR contando propiedades: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error contando propiedades",
@@ -165,41 +171,41 @@ func (h *PropertyHandler) GetProperty(c *fiber.Ctx) error {
 type CreatePropertyRequest struct {
 	UserID *uint `json:"user_id"` // Opcional, si no se usa el del admin
 	// Resto igual que CreatePropertyRequest
-	Titulo          string   `json:"titulo"`
-	TipoOperacion   string   `json:"tipo_operacion"`
-	Precio          float64  `json:"precio"`
-	Moneda          string   `json:"moneda"`
-	AceptaPermuta   bool     `json:"acepta_permuta"`
-	Financia        bool     `json:"financia"`
-	TipoPropiedad   string   `json:"tipo_propiedad"`
-	Direccion       string   `json:"direccion"`
-	Zona            string   `json:"zona"`
-	TipoMarcador    string   `json:"tipo_marcador"`
-	Latitud         *float64 `json:"latitud"`
-	Longitud        *float64 `json:"longitud"`
-	MostrarDireccion bool    `json:"mostrar_direccion"`
-	Dormitorios     string   `json:"dormitorios"`
-	Banos           string   `json:"banos"`
-	Garaje          string   `json:"garaje"`
-	MetrosEdificados float64 `json:"metros_edificados"`
-	MetrosTerreno   float64  `json:"metros_terreno"`
-	Estado          string   `json:"estado"`
-	AnoConstruccion int      `json:"ano_construccion"`
-	AptoOficina     bool     `json:"apto_oficina"`
-	ViviendaSocial  bool     `json:"vivienda_social"`
-	Condominio      bool     `json:"condominio"`
-	CantidadPisos   int      `json:"cantidad_pisos"`
-	Confort         []string `json:"confort"`
-	Seguridad       []string `json:"seguridad"`
-	NoAplicaConfort bool     `json:"no_aplica_confort"`
-	Imagenes        []struct {
+	Titulo           string   `json:"titulo"`
+	TipoOperacion    string   `json:"tipo_operacion"`
+	Precio           float64  `json:"precio"`
+	Moneda           string   `json:"moneda"`
+	AceptaPermuta    bool     `json:"acepta_permuta"`
+	Financia         bool     `json:"financia"`
+	TipoPropiedad    string   `json:"tipo_propiedad"`
+	Direccion        string   `json:"direccion"`
+	Zona             string   `json:"zona"`
+	TipoMarcador     string   `json:"tipo_marcador"`
+	Latitud          *float64 `json:"latitud"`
+	Longitud         *float64 `json:"longitud"`
+	MostrarDireccion bool     `json:"mostrar_direccion"`
+	Dormitorios      string   `json:"dormitorios"`
+	Banos            string   `json:"banos"`
+	Garaje           string   `json:"garaje"`
+	MetrosEdificados float64  `json:"metros_edificados"`
+	MetrosTerreno    float64  `json:"metros_terreno"`
+	Estado           string   `json:"estado"`
+	AnoConstruccion  int      `json:"ano_construccion"`
+	AptoOficina      bool     `json:"apto_oficina"`
+	ViviendaSocial   bool     `json:"vivienda_social"`
+	Condominio       bool     `json:"condominio"`
+	CantidadPisos    int      `json:"cantidad_pisos"`
+	Confort          []string `json:"confort"`
+	Seguridad        []string `json:"seguridad"`
+	NoAplicaConfort  bool     `json:"no_aplica_confort"`
+	Imagenes         []struct {
 		URL   string `json:"url"`
 		Orden int    `json:"orden"`
 	} `json:"imagenes"`
-	VideoURL            string  `json:"video_url"`
-	Descripcion         string  `json:"descripcion"`
-	TerminosCondiciones string  `json:"terminos_condiciones"`
-	AdvisorID           *uint   `json:"advisor_id"`
+	VideoURL            string `json:"video_url"`
+	Descripcion         string `json:"descripcion"`
+	TerminosCondiciones string `json:"terminos_condiciones"`
+	AdvisorID           *uint  `json:"advisor_id"`
 }
 
 // CreateProperty - Crea una propiedad como admin
@@ -704,11 +710,11 @@ func (h *PropertyHandler) LogAudit(c *fiber.Ctx, action, entityType string, enti
 	}
 
 	audit := &models.AuditLog{
-		UserID:     userIDPtr,
-		Action:     action,
-		EntityID:   entityIDPtr,
-		Entity:     entityType,
-		Details:    detailsJSON,
+		UserID:   userIDPtr,
+		Action:   action,
+		EntityID: entityIDPtr,
+		Entity:   entityType,
+		Details:  detailsJSON,
 	}
 
 	_ = auditRepo.Create(audit)

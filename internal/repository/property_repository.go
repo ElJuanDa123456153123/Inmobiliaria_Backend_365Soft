@@ -97,7 +97,8 @@ func (r *PropertyRepository) List(listParams ListPropertyParams) ([]models.Prope
 	}
 
 	if listParams.Zona != "" {
-		query = query.Where("zona ILIKE ?", "%"+listParams.Zona+"%")
+		searchTerm := "%" + listParams.Zona + "%"
+		query = query.Where("(zona ILIKE ? OR direccion ILIKE ? OR titulo ILIKE ?)", searchTerm, searchTerm, searchTerm)
 	}
 
 	if listParams.Moneda != "" {
@@ -154,16 +155,16 @@ func (r *PropertyRepository) List(listParams ListPropertyParams) ([]models.Prope
 
 	if listParams.SearchText != "" {
 		searchTerm := "%" + listParams.SearchText + "%"
-		query = query.Where("titulo ILIKE ? OR descripcion ILIKE ?", searchTerm, searchTerm)
+		query = query.Where("(titulo ILIKE ? OR descripcion ILIKE ? OR zona ILIKE ? OR direccion ILIKE ?)", searchTerm, searchTerm, searchTerm, searchTerm)
 	}
 
 	if listParams.UserID != nil {
 		query = query.Where("user_id = ?", *listParams.UserID)
 	}
 
-	// Contar total
+	// Contar total (usando una sesión aislada)
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -178,7 +179,7 @@ func (r *PropertyRepository) List(listParams ListPropertyParams) ([]models.Prope
 		orderByColumn = "metros_edificados"
 	}
 
-	// Aplicar paginación y obtener resultados
+	// Aplicar paginación y obtener resultados (usando la query original)
 	var properties []models.Property
 	err := query.
 		Preload("PropertyImages", func(db *gorm.DB) *gorm.DB {
@@ -249,9 +250,9 @@ func (r *PropertyRepository) FullTextSearch(query string, limit, offset int) ([]
 	// Búsqueda usando tsvector con ranking
 	searchQuery := fmt.Sprintf(`
 		SELECT id,
-		       ts_rank(search_vector, plainto_tsquery('spanish', $?)) as rank
+		       ts_rank(search_vector, plainto_tsquery('spanish', ?)) as rank
 		FROM propiedades
-		WHERE search_vector @@ plainto_tsquery('spanish', $?)
+		WHERE search_vector @@ plainto_tsquery('spanish', ?)
 			AND estado_propiedad = 'activo'
 			AND deleted_at IS NULL
 		ORDER BY rank DESC, created_at DESC
@@ -259,7 +260,7 @@ func (r *PropertyRepository) FullTextSearch(query string, limit, offset int) ([]
 	`)
 
 	var results []struct {
-		ID  uint
+		ID   uint
 		Rank float64
 	}
 
@@ -282,7 +283,7 @@ func (r *PropertyRepository) FullTextSearch(query string, limit, offset int) ([]
 	countQuery := fmt.Sprintf(`
 		SELECT COUNT(*)
 		FROM propiedades
-		WHERE search_vector @@ plainto_tsquery('spanish', $?)
+		WHERE search_vector @@ plainto_tsquery('spanish', ?)
 			AND estado_propiedad = 'activo'
 			AND deleted_at IS NULL
 	`)
@@ -360,7 +361,7 @@ func (r *PropertyRepository) FullTextSearchWithFilters(
 
 	// Consulta de búsqueda con ranking
 	searchQuery := fmt.Sprintf(`
-		SELECT id, ts_rank(search_vector, plainto_tsquery('spanish', $?)) as rank
+		SELECT id, ts_rank(search_vector, plainto_tsquery('spanish', ?)) as rank
 		FROM propiedades
 		%s
 		ORDER BY rank DESC, created_at DESC
@@ -371,7 +372,7 @@ func (r *PropertyRepository) FullTextSearchWithFilters(
 	args = append(args, limit, offset)
 
 	var results []struct {
-		ID  uint
+		ID   uint
 		Rank float64
 	}
 
@@ -409,11 +410,11 @@ func (r *PropertyRepository) FullTextSearchWithFilters(
 type ListSearchParams struct {
 	TipoOperacion string
 	TipoPropiedad string
-	Moneda       string
-	PrecioMin    float64
-	PrecioMax    float64
-	MetrosMin    float64
-	MetrosMax    float64
+	Moneda        string
+	PrecioMin     float64
+	PrecioMax     float64
+	MetrosMin     float64
+	MetrosMax     float64
 }
 
 // ListPropertyParams - Parámetros para listar propiedades

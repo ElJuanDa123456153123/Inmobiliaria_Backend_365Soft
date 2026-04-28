@@ -71,26 +71,26 @@ type CreatePropertyRequest struct {
 	MostrarDireccion bool     `json:"mostrar_direccion"`
 
 	// === DETALLES DE LA PROPIEDAD (PASO 3) ===
-	Dormitorios     string   `json:"dormitorios"`
-	Banos           string   `json:"banos"`
-	Garaje          string   `json:"garaje"`
+	Dormitorios      string  `json:"dormitorios"`
+	Banos            string  `json:"banos"`
+	Garaje           string  `json:"garaje"`
 	MetrosEdificados float64 `json:"metros_edificados"`
-	MetrosTerreno   float64  `json:"metros_terreno"`
-	Estado          string   `json:"estado"`
-	AnoConstruccion int      `json:"ano_construccion"`
-	AptoOficina     bool     `json:"apto_oficina"`
-	ViviendaSocial  bool     `json:"vivienda_social"`
-	Condominio      bool     `json:"condominio"`
-	CantidadPisos   int      `json:"cantidad_pisos"`
+	MetrosTerreno    float64 `json:"metros_terreno"`
+	Estado           string  `json:"estado"`
+	AnoConstruccion  int     `json:"ano_construccion"`
+	AptoOficina      bool    `json:"apto_oficina"`
+	ViviendaSocial   bool    `json:"vivienda_social"`
+	Condominio       bool    `json:"condominio"`
+	CantidadPisos    int     `json:"cantidad_pisos"`
 
 	// === CONFORT Y SEGURIDAD (PASO 4) ===
-	Confort        []string `json:"confort"`
-	Seguridad      []string `json:"seguridad"`
-	NoAplicaConfort bool    `json:"no_aplica_confort"`
+	Confort         []string `json:"confort"`
+	Seguridad       []string `json:"seguridad"`
+	NoAplicaConfort bool     `json:"no_aplica_confort"`
 
 	// === IMÁGENES Y VIDEO (PASO 5) ===
 	Imagenes []struct {
-		URL   string `json:"url"`   // URL de la imagen (ej: /api/imagenes/propiedad-123-1.webp)
+		URL   string `json:"url"` // URL de la imagen (ej: /api/imagenes/propiedad-123-1.webp)
 		Orden int    `json:"orden"`
 	} `json:"imagenes"`
 	VideoURL string `json:"video_url"`
@@ -191,9 +191,9 @@ func (h *PropertyHandler) CreateProperty(c *fiber.Ctx) error {
 	// 🔒 Auditoría: Log de creación
 	h.LogAudit(c, "create_property", "property", &property.ID, &user.ID, map[string]interface{}{
 		"titulo":         property.Titulo,
-		"precio":          property.Precio,
-		"moneda":          property.Moneda,
-		"tipo_operacion":  property.TipoOperacion,
+		"precio":         property.Precio,
+		"moneda":         property.Moneda,
+		"tipo_operacion": property.TipoOperacion,
 	})
 
 	// 🚀 Redis: Caché y pub/sub para actualizaciones en tiempo real
@@ -284,8 +284,8 @@ type ListPropertiesRequest struct {
 	SearchText     string  `json:"search"`          // Búsqueda en título y descripción
 
 	// === ORDENAMIENTO ===
-	OrderBy string `json:"order_by"`  // precio, fecha, vistas, metros
-	Order   string `json:"order"`     // asc, desc
+	OrderBy string `json:"order_by"` // precio, fecha, vistas, metros
+	Order   string `json:"order"`    // asc, desc
 
 	// === PAGINACIÓN ===
 	Page  int `json:"page"`  // Número de página (empezando en 1)
@@ -310,17 +310,45 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 		}
 	}
 
+	tipoOperacion := strings.ToLower(c.Query("tipo_operacion"))
+	if tipoOperacion == "" {
+		tipoOperacion = strings.ToLower(c.Query("operation"))
+	}
+	if tipoOperacion == "todas" || tipoOperacion == "todos" {
+		tipoOperacion = ""
+	}
+
+	tipoPropiedad := strings.ToLower(c.Query("tipo_propiedad"))
+	if tipoPropiedad == "" {
+		tipoPropiedad = strings.ToLower(c.Query("propertyType"))
+	}
+	if tipoPropiedad == "todas" || tipoPropiedad == "todos" {
+		tipoPropiedad = ""
+	}
+
+	zonaFilter := c.Query("zona")
+	searchFilter := c.Query("search")
+	// Hack: Si buscan la ciudad principal pero no está en la base de datos, mostramos todas
+	lowerZona := strings.ToLower(strings.TrimSpace(zonaFilter))
+	if lowerZona == "santa cruz" || lowerZona == "santa cruz de la sierra" {
+		zonaFilter = ""
+	}
+	lowerSearch := strings.ToLower(strings.TrimSpace(searchFilter))
+	if lowerSearch == "santa cruz" || lowerSearch == "santa cruz de la sierra" {
+		searchFilter = ""
+	}
+
 	// Parsear parámetros
 	req := ListPropertiesRequest{
-		TipoOperacion: c.Query("tipo_operacion"),
-		TipoPropiedad: c.Query("tipo_propiedad"),
-		Zona:          c.Query("zona"),
+		TipoOperacion: tipoOperacion,
+		TipoPropiedad: tipoPropiedad,
+		Zona:          zonaFilter,
 		Estado:        c.Query("estado", "activo"),
 		Moneda:        c.Query("moneda"),
 		Dormitorios:   c.Query("dormitorios"),
 		Banos:         c.Query("banos"),
 		Garaje:        c.Query("garaje"),
-		SearchText:    c.Query("search"),
+		SearchText:    searchFilter,
 		OrderBy:       c.Query("order_by", "fecha"),
 		Order:         c.Query("order", "desc"),
 		Page:          c.QueryInt("page", 1),
@@ -411,11 +439,13 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 	// Validar tipo de operación
 	if req.TipoOperacion != "" {
 		validOps := map[string]bool{
-			"venta": true, "alquiler": true,
+			"venta":       true,
+			"alquiler":    true,
+			"anticretico": true,
 		}
 		if !validOps[req.TipoOperacion] {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "tipo_operacion inválido. Debe ser: venta, alquiler",
+				"error": "tipo_operacion inválido. Debe ser: venta, alquiler, anticretico",
 			})
 		}
 	}
@@ -515,10 +545,26 @@ func (h *PropertyHandler) SearchProperties(c *fiber.Ctx) error {
 	}
 
 	// Parsear parámetros de filtros
+	tipoOperacion := strings.ToLower(c.Query("tipo_operacion"))
+	if tipoOperacion == "" {
+		tipoOperacion = strings.ToLower(c.Query("operation"))
+	}
+	if tipoOperacion == "todas" || tipoOperacion == "todos" {
+		tipoOperacion = ""
+	}
+
+	tipoPropiedad := strings.ToLower(c.Query("tipo_propiedad"))
+	if tipoPropiedad == "" {
+		tipoPropiedad = strings.ToLower(c.Query("propertyType"))
+	}
+	if tipoPropiedad == "todas" || tipoPropiedad == "todos" {
+		tipoPropiedad = ""
+	}
+
 	req := &service.FullTextSearchRequest{
 		Query:         query,
-		TipoOperacion: c.Query("tipo_operacion"),
-		TipoPropiedad: c.Query("tipo_propiedad"),
+		TipoOperacion: tipoOperacion,
+		TipoPropiedad: tipoPropiedad,
 		Moneda:        c.Query("moneda"),
 		Page:          c.QueryInt("page", 1),
 		Limit:         c.QueryInt("limit", 20),
@@ -567,14 +613,14 @@ func (h *PropertyHandler) SearchProperties(c *fiber.Ctx) error {
 
 	// Construir respuesta
 	return c.JSON(fiber.Map{
-		"query":        query,
-		"propiedades":  properties,
-		"total":        total,
-		"page":         req.Page,
-		"limit":        req.Limit,
-		"total_pages":  totalPages,
-		"has_next":     req.Page < totalPages,
-		"has_prev":     req.Page > 1,
+		"query":       query,
+		"propiedades": properties,
+		"total":       total,
+		"page":        req.Page,
+		"limit":       req.Limit,
+		"total_pages": totalPages,
+		"has_next":    req.Page < totalPages,
+		"has_prev":    req.Page > 1,
 	})
 }
 
@@ -661,7 +707,7 @@ func (h *PropertyHandler) UpdatePropertyStatus(c *fiber.Ctx) error {
 		h.Redis.InvalidateProperty(property.ID)
 		h.Redis.InvalidatePropertyLists()
 		h.Redis.PublishPropertyUpdate("status_changed", property.ID, map[string]interface{}{
-			"id":             property.ID,
+			"id":              property.ID,
 			"estado_anterior": string(estadoAnterior),
 			"estado_nuevo":    string(nuevoEstado),
 		})
