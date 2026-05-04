@@ -215,6 +215,7 @@ Sistema inmobiliario que permite a usuarios (personas naturales, agentes, inmobi
 
   **Opción A: Período de prueba GRATIS** (configurable por admin)
   - 2 meses GRATIS sin pagar
+  - **MÁXIMO 2 propiedades** publicadas durante este período
   - Después de 2 meses: Debe pagar para renovar
 
   **Opción B: Pago inmediato** (si admin desactivó prueba gratuita)
