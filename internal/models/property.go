@@ -67,6 +67,15 @@ type Property struct {
 	AceptaPermuta   bool          `gorm:"default:false" json:"acepta_permuta"`
 	Financia        bool          `gorm:"default:false" json:"financia"`
 
+	// Campos específicos para ALQUILER
+	Deposito        string `gorm:"size:20" json:"deposito,omitempty"`                   // 1 mes, 2 meses, etc.
+	PlazoMinimo     string `gorm:"size:20" json:"plazo_minimo,omitempty"`              // 6 meses, 1 año, etc.
+	ServiciosIncluidos datatypes.JSON `gorm:"type:jsonb" json:"servicios_incluidos,omitempty"` // ["luz", "agua", "internet"]
+
+	// Campos específicos para ANTICRÉTICO
+	DuracionContrato string `gorm:"size:20" json:"duracion_contrato,omitempty"`         // 1 año, 2 años, etc.
+	OpcionCompra     bool   `gorm:"default:false" json:"opcion_compra,omitempty"`      // true/false
+
 	// === DATOS GENERALES (PASO 2) ===
 	TipoPropiedad    PropertyType `gorm:"size:30;not null" json:"tipo_propiedad"`
 	Direccion        string       `gorm:"type:text" json:"direccion"`
@@ -115,6 +124,7 @@ type Property struct {
 	VendedorTelefono   string `gorm:"size:30" json:"vendedor_telefono,omitempty"`
 	VendedorContacto   string `gorm:"size:100" json:"vendedor_contacto,omitempty"`
 	VendedorHorario    string `gorm:"size:100" json:"vendedor_horario,omitempty"`
+	MostrarVendedor    bool   `gorm:"default:true" json:"mostrar_vendedor"` // Por defecto true (visible), toggle para ocultar y mostrar "365Soft"
 }
 
 // TableName - Especifica el nombre de la tabla en PostgreSQL

@@ -183,8 +183,7 @@ func (r *PropertyRepository) List(listParams ListPropertyParams) ([]models.Prope
 	var properties []models.Property
 	err := query.
 		Preload("PropertyImages", func(db *gorm.DB) *gorm.DB {
-			return db.Where("principal = ? OR principal IS NULL", true).
-				Order("orden ASC")
+			return db.Order("principal DESC, orden ASC")
 		}).
 		Order(orderByColumn + " " + listParams.Order).
 		Limit(listParams.Limit).

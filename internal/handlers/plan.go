@@ -14,7 +14,7 @@ type PlanHandler struct {
 
 // NewPlanHandler - Crea un nuevo handler de planes
 func NewPlanHandler() (*PlanHandler, error) {
-	dbConfig, err := config.NewDatabase()
+	dbConfig, err := config.GetDatabase()
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -16,8 +17,27 @@ type Database struct {
 	DB *gorm.DB
 }
 
+// Singleton para la conexión de base de datos
+var (
+	dbInstance *Database
+	dbOnce     sync.Once
+	dbMutex    sync.RWMutex
+)
+
+// GetDatabase - Obtiene la instancia singleton de la base de datos
+func GetDatabase() (*Database, error) {
+	var err error
+	dbOnce.Do(func() {
+		dbInstance, err = NewDatabase()
+	})
+	return dbInstance, err
+}
+
 // NewDatabase - Crea una nueva conexión a PostgreSQL con reintentos
 func NewDatabase() (*Database, error) {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
 	// Obtener URL de la base de datos desde variables de entorno
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -27,37 +47,16 @@ func NewDatabase() (*Database, error) {
 
 	// Configurar GORM
 	gormConfig := &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Silent),
 	}
-
-	// Configurar reintentos
-	maxRetries := 10
-	retryDelay := 3 * time.Second
 
 	var db *gorm.DB
 	var err error
 
-	// Intentar conectar con reintentos
-	for i := 0; i < maxRetries; i++ {
-		// Abrir conexión
-		db, err = gorm.Open(postgres.Open(databaseURL), gormConfig)
-		if err == nil {
-			// Conexión exitosa
-			break
-		}
-
-		// Log del intento fallido
-		if i < maxRetries-1 {
-			log.Printf("⏳ Intento %d/%d: No se pudo conectar a PostgreSQL. Reintentando en %v...",
-				i+1, maxRetries, retryDelay)
-			log.Printf("   Error: %v", err)
-			time.Sleep(retryDelay)
-		}
-	}
-
-	// Verificar si finalmente se pudo conectar
+	// Abrir conexión
+	db, err = gorm.Open(postgres.Open(databaseURL), gormConfig)
 	if err != nil {
-		return nil, fmt.Errorf("error conectando a la base de datos después de %d intentos: %w", maxRetries, err)
+		return nil, fmt.Errorf("error conectando a la base de datos: %w", err)
 	}
 
 	sqlDB, err := db.DB()
@@ -65,8 +64,10 @@ func NewDatabase() (*Database, error) {
 		return nil, fmt.Errorf("error obteniendo conexión SQL: %w", err)
 	}
 
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
+	// Configurar pool de conexiones con valores más conservadores
+	sqlDB.SetMaxIdleConns(5)           // Conexiones inactivas máximas
+	sqlDB.SetMaxOpenConns(25)          // Conexiones abiertas máximas (reducido de 100)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute) // Reutilizar conexiones por máximo 5 minutos
 
 	log.Println("✅ Conectado a PostgreSQL exitosamente")
 	return &Database{DB: db}, nil

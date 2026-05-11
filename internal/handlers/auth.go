@@ -22,7 +22,7 @@ type AuthHandler struct {
 
 // NewAuthHandler - Crea un nuevo handler de autenticación
 func NewAuthHandler() (*AuthHandler, error) {
-	dbConfig, err := config.NewDatabase()
+	dbConfig, err := config.GetDatabase()
 	if err != nil {
 		return nil, err
 	}

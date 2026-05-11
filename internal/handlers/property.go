@@ -22,7 +22,7 @@ type PropertyHandler struct {
 
 // NewPropertyHandler - Crea un nuevo handler de propiedades con Service Layer
 func NewPropertyHandler() (*PropertyHandler, error) {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +60,15 @@ type CreatePropertyRequest struct {
 	Moneda        string  `json:"moneda"`
 	AceptaPermuta bool    `json:"acepta_permuta"`
 	Financia      bool    `json:"financia"`
+
+	// Campos específicos para ALQUILER
+	Deposito           string   `json:"deposito,omitempty"`           // 1 mes, 2 meses, etc.
+	PlazoMinimo        string   `json:"plazo_minimo,omitempty"`        // 6 meses, 1 año, etc.
+	ServiciosIncluidos []string `json:"servicios_incluidos,omitempty"` // ["luz", "agua", "internet"]
+
+	// Campos específicos para ANTICRÉTICO
+	DuracionContrato string `json:"duracion_contrato,omitempty"` // 1 año, 2 años, etc.
+	OpcionCompra     bool   `json:"opcion_compra,omitempty"`      // true/false
 
 	// === DATOS GENERALES (PASO 2) ===
 	TipoPropiedad    string   `json:"tipo_propiedad"`
@@ -139,6 +148,13 @@ func (h *PropertyHandler) CreateProperty(c *fiber.Ctx) error {
 		Moneda:              req.Moneda,
 		AceptaPermuta:       req.AceptaPermuta,
 		Financia:            req.Financia,
+		// Campos específicos para alquiler
+		Deposito:           req.Deposito,
+		PlazoMinimo:        req.PlazoMinimo,
+		ServiciosIncluidos: req.ServiciosIncluidos,
+		// Campos específicos para anticrético
+		DuracionContrato: req.DuracionContrato,
+		OpcionCompra:     req.OpcionCompra,
 		TipoPropiedad:       req.TipoPropiedad,
 		Direccion:           req.Direccion,
 		Zona:                req.Zona,
@@ -242,8 +258,8 @@ func (h *PropertyHandler) GetProperty(c *fiber.Ctx) error {
 		// Cache miss, continue to DB
 	}
 
-	// Obtener propiedad a través del servicio
-	property, err = h.PropertyService.GetPropertyByID(uint(id))
+	// Obtener propiedad a través del servicio (con todas las relaciones incluyendo asesores)
+	property, err = h.PropertyService.GetPropertyByIDWithRelations(uint(id))
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "Propiedad no encontrada",

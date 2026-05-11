@@ -44,6 +44,13 @@ type CreatePropertyRequest struct {
 	Moneda         string
 	AceptaPermuta  bool
 	Financia       bool
+	// Campos específicos para ALQUILER
+	Deposito           string
+	PlazoMinimo        string
+	ServiciosIncluidos []string
+	// Campos específicos para ANTICRÉTICO
+	DuracionContrato string
+	OpcionCompra     bool
 	TipoPropiedad  string
 	Direccion      string
 	Zona           string
@@ -119,6 +126,11 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 		Moneda:           req.Moneda,
 		AceptaPermuta:    req.AceptaPermuta,
 		Financia:         req.Financia,
+		// Campos específicos para alquiler/anticrético
+		Deposito:           req.Deposito,
+		PlazoMinimo:        req.PlazoMinimo,
+		DuracionContrato:   req.DuracionContrato,
+		OpcionCompra:       req.OpcionCompra,
 		TipoPropiedad:    models.PropertyType(req.TipoPropiedad),
 		Direccion:        req.Direccion,
 		Zona:             req.Zona,
@@ -163,6 +175,10 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 	if req.Seguridad != nil {
 		seguridadBytes, _ := json.Marshal(req.Seguridad)
 		property.Seguridad = datatypes.JSON(seguridadBytes)
+	}
+	if req.ServiciosIncluidos != nil {
+		serviciosBytes, _ := json.Marshal(req.ServiciosIncluidos)
+		property.ServiciosIncluidos = datatypes.JSON(serviciosBytes)
 	}
 
 	// Guardar propiedad
@@ -403,14 +419,40 @@ func (s *PropertyService) validateCreateRequest(req *CreatePropertyRequest) erro
 		return errors.ValidationError("moneda", "Moneda inválida. Debe ser: USD o BOB")
 	}
 
-	// Validar precio según moneda
+	// Validar precio según moneda Y tipo de operación
 	if req.Moneda == "USD" {
-		if req.Precio < 100 || req.Precio > 100000000 {
-			return errors.ValidationError("precio", "El precio en USD debe estar entre $100 y $100,000,000")
+		if req.TipoOperacion == "alquiler" {
+			// Alquiler en USD (precios mensuales): $50 - $50,000
+			if req.Precio < 50 || req.Precio > 50000 {
+				return errors.ValidationError("precio", "El precio de alquiler en USD debe estar entre $50 y $50,000 mensuales")
+			}
+		} else if req.TipoOperacion == "anticretico" {
+			// Anticrético en USD: $1,000 - $1,000,000
+			if req.Precio < 1000 || req.Precio > 1000000 {
+				return errors.ValidationError("precio", "El monto de anticrético en USD debe estar entre $1,000 y $1,000,000")
+			}
+		} else {
+			// Venta en USD: $100 - $100,000,000
+			if req.Precio < 100 || req.Precio > 100000000 {
+				return errors.ValidationError("precio", "El precio en USD debe estar entre $100 y $100,000,000")
+			}
 		}
 	} else if req.Moneda == "BOB" {
-		if req.Precio < 1000 || req.Precio > 500000000 {
-			return errors.ValidationError("precio", "El precio en BOB debe estar entre 1,000 y 500,000,000 Bs")
+		if req.TipoOperacion == "alquiler" {
+			// Alquiler en BOB (precios mensuales): 200 - 200,000 Bs
+			if req.Precio < 200 || req.Precio > 200000 {
+				return errors.ValidationError("precio", "El precio de alquiler en BOB debe estar entre 200 y 200,000 Bs mensuales")
+			}
+		} else if req.TipoOperacion == "anticretico" {
+			// Anticrético en BOB: 5,000 - 5,000,000 Bs
+			if req.Precio < 5000 || req.Precio > 5000000 {
+				return errors.ValidationError("precio", "El monto de anticrético en BOB debe estar entre 5,000 y 5,000,000 Bs")
+			}
+		} else {
+			// Venta en BOB: 1,000 - 500,000,000 Bs
+			if req.Precio < 1000 || req.Precio > 500000000 {
+				return errors.ValidationError("precio", "El precio en BOB debe estar entre 1,000 y 500,000,000 Bs")
+			}
 		}
 	}
 
@@ -519,6 +561,10 @@ func (s *PropertyService) CreatePropertyAsAdmin(req *CreatePropertyRequest) (*mo
 	if req.Seguridad != nil {
 		seguridadBytes, _ := json.Marshal(req.Seguridad)
 		property.Seguridad = datatypes.JSON(seguridadBytes)
+	}
+	if req.ServiciosIncluidos != nil {
+		serviciosBytes, _ := json.Marshal(req.ServiciosIncluidos)
+		property.ServiciosIncluidos = datatypes.JSON(serviciosBytes)
 	}
 
 	// Guardar propiedad
@@ -651,6 +697,9 @@ func (s *PropertyService) UpdateProperty(id uint, updates map[string]interface{}
 	}
 	if advisorID, ok := updates["advisor_id"].(*uint); ok {
 		property.AdvisorID = advisorID
+	}
+	if mostrarVendedor, ok := updates["mostrar_vendedor"].(bool); ok {
+		property.MostrarVendedor = mostrarVendedor
 	}
 
 	// Guardar cambios

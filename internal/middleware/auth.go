@@ -130,10 +130,10 @@ func AdminMiddleware() fiber.Handler {
 			})
 		}
 
-		// Verificar rol
-		if user.Rol != models.RoleAdmin {
+		// Verificar rol (admin, agente o inmobiliaria tienen acceso)
+		if user.Rol != models.RoleAdmin && user.Rol != models.RoleAgente && user.Rol != models.RoleInmobiliaria {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "Acceso denegado: se requiere rol de administrador",
+				"error": "Acceso denegado: se requiere rol de administrador, agente o inmobiliaria",
 			})
 		}
 

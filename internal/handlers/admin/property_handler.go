@@ -25,7 +25,7 @@ type PropertyHandler struct {
 
 // NewPropertyHandler - Crea un nuevo handler de propiedades para admin
 func NewPropertyHandler() (*PropertyHandler, error) {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func NewPropertyHandler() (*PropertyHandler, error) {
 
 // ListProperties - Lista todas las propiedades con filtros avanzados
 func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -177,6 +177,13 @@ type CreatePropertyRequest struct {
 	Moneda           string   `json:"moneda"`
 	AceptaPermuta    bool     `json:"acepta_permuta"`
 	Financia         bool     `json:"financia"`
+	// Campos específicos para ALQUILER
+	Deposito           string   `json:"deposito,omitempty"`
+	PlazoMinimo        string   `json:"plazo_minimo,omitempty"`
+	ServiciosIncluidos []string `json:"servicios_incluidos,omitempty"`
+	// Campos específicos para ANTICRÉTICO
+	DuracionContrato string `json:"duracion_contrato,omitempty"`
+	OpcionCompra     bool   `json:"opcion_compra,omitempty"`
 	TipoPropiedad    string   `json:"tipo_propiedad"`
 	Direccion        string   `json:"direccion"`
 	Zona             string   `json:"zona"`
@@ -251,6 +258,13 @@ func (h *PropertyHandler) CreateProperty(c *fiber.Ctx) error {
 		Moneda:              req.Moneda,
 		AceptaPermuta:       req.AceptaPermuta,
 		Financia:            req.Financia,
+		// Campos específicos para alquiler
+		Deposito:           req.Deposito,
+		PlazoMinimo:        req.PlazoMinimo,
+		ServiciosIncluidos: req.ServiciosIncluidos,
+		// Campos específicos para anticrético
+		DuracionContrato: req.DuracionContrato,
+		OpcionCompra:     req.OpcionCompra,
 		TipoPropiedad:       req.TipoPropiedad,
 		Direccion:           req.Direccion,
 		Zona:                req.Zona,
@@ -346,6 +360,7 @@ type UpdatePropertyRequest struct {
 	Descripcion         *string   `json:"descripcion"`
 	TerminosCondiciones *string   `json:"terminos_condiciones"`
 	AdvisorID           *uint     `json:"advisor_id"`
+	MostrarVendedor     *bool     `json:"mostrar_vendedor"`
 }
 
 // UpdateProperty - Actualiza una propiedad
@@ -455,6 +470,9 @@ func (h *PropertyHandler) UpdateProperty(c *fiber.Ctx) error {
 	if req.AdvisorID != nil {
 		updateData["advisor_id"] = *req.AdvisorID
 	}
+	if req.MostrarVendedor != nil {
+		updateData["mostrar_vendedor"] = *req.MostrarVendedor
+	}
 
 	idUint, _ := strconv.ParseUint(id, 10, 32)
 	property, err := h.PropertyService.UpdateProperty(uint(idUint), updateData)
@@ -470,6 +488,13 @@ func (h *PropertyHandler) UpdateProperty(c *fiber.Ctx) error {
 	}
 
 	h.LogAudit(c, "admin_update_property", "property", &property.ID, &user.ID, updateData)
+
+	// 🚀 Redis: Invalidar caché y publicar actualización
+	if h.Redis != nil {
+		h.Redis.InvalidateProperty(property.ID)
+		h.Redis.InvalidatePropertyLists()
+		h.Redis.PublishPropertyUpdate("updated", property.ID, updateData)
+	}
 
 	return c.JSON(fiber.Map{
 		"message":  "Propiedad actualizada exitosamente",
@@ -639,7 +664,7 @@ func (h *PropertyHandler) AssignAdvisor(c *fiber.Ctx) error {
 
 // GetPropertiesStats - Obtiene estadísticas de propiedades
 func (h *PropertyHandler) GetPropertiesStats(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -683,7 +708,7 @@ func (h *PropertyHandler) GetPropertiesStats(c *fiber.Ctx) error {
 
 // LogAudit - Helper para registrar auditoría
 func (h *PropertyHandler) LogAudit(c *fiber.Ctx, action, entityType string, entityID, userID interface{}, metadata map[string]interface{}) {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return
 	}

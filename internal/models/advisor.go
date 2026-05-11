@@ -20,7 +20,12 @@ type Advisor struct {
 	Especialidad string  `gorm:"size:100" json:"especialidad"` // Ej: "Lujo", "Venta", "Alquiler"
 
 	// Foto de perfil del asesor (URL o base64)
-	ImagenURL string `gorm:"type:text" json:"imagen_url,omitempty"`
+	ImagenURL string `gorm:"type:text" json:"imagen_url,omitempty"` // Campo antiguo, mantener por compatibilidad
+	AvatarURL string `gorm:"type:text" json:"avatar_url,omitempty"` // Nuevo campo de avatar
+
+	// Usuario asociado (para login)
+	UserID *uint `gorm:"uniqueIndex" json:"user_id,omitempty"`
+	User   *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 
 	// Estado
 	Activo bool `gorm:"default:true" json:"activo"`

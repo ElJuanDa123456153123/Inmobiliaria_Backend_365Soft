@@ -54,7 +54,7 @@ type User struct {
 	EmailToken  string `gorm:"size:255" json:"-"` // Token para verificación
 
 	// Avatar (URL)
-	AvatarURL string `gorm:"size:500" json:"avatar_url,omitempty"`
+	AvatarURL string `gorm:"size:500" json:"avatar_url"`
 }
 
 // TableName - Especifica el nombre de la tabla en PostgreSQL

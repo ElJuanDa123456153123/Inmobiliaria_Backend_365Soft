@@ -44,6 +44,12 @@ func AutoMigrate() error {
 		// No fallar si la configuración falla (puede que ya se haya ejecutado)
 	}
 
+	// Migrar datos existentes (mostrar_vendedor y asesores)
+	if err := MigrateExistingData(db); err != nil {
+		log.Printf("⚠️  Advertencia migrando datos existentes: %v\n", err)
+		// No fallar si la migración falla
+	}
+
 	log.Println("✅ Migraciones ejecutadas exitosamente")
 	return nil
 }
@@ -81,5 +87,68 @@ func migratePropertyImageURL(db *config.Database) error {
 	}
 
 	log.Println("✓ Columna image_url migrada a TEXT exitosamente")
+	return nil
+}
+
+// MigrateExistingData - Migra datos existentes para sincronizar usuarios y asesores,
+// y actualizar propiedades para mostrar vendedor por defecto
+func MigrateExistingData(db *config.Database) error {
+	log.Println("🔄 Verificando datos existentes para migrar...")
+
+	// 1. Actualizar todas las propiedades para que mostrar_vendedor = true
+	var propsUpdated int64
+	if err := db.DB.Model(&models.Property{}).
+		Where("mostrar_vendedor = ? OR mostrar_vendedor IS NULL", false).
+		Update("mostrar_vendedor", true).Error; err != nil {
+		log.Printf("❌ Error actualizando propiedades: %v\n", err)
+	} else {
+		propsUpdated = db.DB.RowsAffected
+		if propsUpdated > 0 {
+			log.Printf("✅ Propiedades actualizadas (mostrar_vendedor=true): %d\n", propsUpdated)
+		}
+	}
+
+	// 2. Crear registros en asesores para usuarios con rol "agente" que no tengan uno
+	var users []models.User
+	if err := db.DB.Where("rol = ? AND deleted_at IS NULL", models.RoleAgente).Find(&users).Error; err != nil {
+		log.Printf("❌ Error buscando usuarios con rol agente: %v\n", err)
+		return err
+	}
+
+	advisorsCreated := 0
+	for _, user := range users {
+		// Verificar si ya existe un asesor para este usuario
+		var existingAdvisor models.Advisor
+		if err := db.DB.Where("user_id = ?", user.ID).First(&existingAdvisor).Error; err == nil {
+			// Ya existe, continuar
+			continue
+		}
+
+		// Crear nuevo asesor
+		advisor := models.Advisor{
+			Nombre:    user.Nombre,
+			Email:     user.Email,
+			Telefono:  user.Telefono,
+			AvatarURL: user.AvatarURL,
+			Activo:    user.Activo,
+			UserID:    &user.ID,
+		}
+
+		if err := db.DB.Create(&advisor).Error; err != nil {
+			log.Printf("❌ Error creando asesor para usuario %d: %v\n", user.ID, err)
+		} else {
+			advisorsCreated++
+			log.Printf("✅ Asesor creado para usuario %d (%s)\n", user.ID, user.Nombre)
+		}
+	}
+
+	if advisorsCreated > 0 {
+		log.Printf("✅ Total de asesores creados: %d\n", advisorsCreated)
+	}
+
+	if propsUpdated > 0 || advisorsCreated > 0 {
+		log.Printf("🎉 Migración de datos completada: %d propiedades actualizadas, %d asesores creados\n", propsUpdated, advisorsCreated)
+	}
+
 	return nil
 }

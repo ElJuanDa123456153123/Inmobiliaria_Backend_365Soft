@@ -6,6 +6,7 @@ import (
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/models"
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -16,7 +17,7 @@ type AdvisorHandler struct {
 
 // NewAdvisorHandler - Crea un nuevo handler de asesores
 func NewAdvisorHandler() (*AdvisorHandler, error) {
-	dbConfig, err := config.NewDatabase()
+	dbConfig, err := config.GetDatabase()
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +29,7 @@ func NewAdvisorHandler() (*AdvisorHandler, error) {
 
 // GetAdvisors - Obtiene todos los asesores con paginación y filtros
 func (h *AdvisorHandler) GetAdvisors(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		fmt.Printf("❌ ERROR creando conexión: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -44,8 +45,8 @@ func (h *AdvisorHandler) GetAdvisors(c *fiber.Ctx) error {
 
 	offset := (page - 1) * limit
 
-	// Construir query
-	query := db.DB.Model(&models.Advisor{})
+	// Construir query - Preload User para obtener avatar_url
+	query := db.DB.Model(&models.Advisor{}).Where("deleted_at IS NULL").Preload("User")
 
 	// Filtro por activo
 	if activo != "" {
@@ -80,6 +81,13 @@ func (h *AdvisorHandler) GetAdvisors(c *fiber.Ctx) error {
 		})
 	}
 
+	// Si el asesor no tiene avatar_url, usar el del usuario asociado
+	for i := range advisors {
+		if advisors[i].AvatarURL == "" && advisors[i].User != nil && advisors[i].User.AvatarURL != "" {
+			advisors[i].AvatarURL = advisors[i].User.AvatarURL
+		}
+	}
+
 	return c.JSON(fiber.Map{
 		"advisors": advisors,
 		"total":    total,
@@ -90,7 +98,7 @@ func (h *AdvisorHandler) GetAdvisors(c *fiber.Ctx) error {
 
 // GetAdvisor - Obtiene un asesor por ID
 func (h *AdvisorHandler) GetAdvisor(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -120,6 +128,7 @@ func (h *AdvisorHandler) GetAdvisor(c *fiber.Ctx) error {
 type CreateAdvisorRequest struct {
 	Nombre       string `json:"nombre"`
 	Email        string `json:"email"`
+	Password     string `json:"password"` // Contraseña para el login
 	Telefono     string `json:"telefono"`
 	Especialidad string `json:"especialidad"`
 	ImagenURL    string `json:"imagen_url,omitempty"` // URL de la foto de perfil
@@ -128,7 +137,7 @@ type CreateAdvisorRequest struct {
 
 // CreateAdvisor - Crea un nuevo asesor
 func (h *AdvisorHandler) CreateAdvisor(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -143,17 +152,32 @@ func (h *AdvisorHandler) CreateAdvisor(c *fiber.Ctx) error {
 	}
 
 	// Validaciones básicas
-	if req.Nombre == "" || req.Email == "" {
+	if req.Nombre == "" || req.Email == "" || req.Password == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Nombre y email son requeridos",
+			"error": "Nombre, email y password son requeridos",
 		})
 	}
 
-	// Verificar si el email ya existe
+	// Validar longitud de contraseña
+	if len(req.Password) < 6 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "La contraseña debe tener al menos 6 caracteres",
+		})
+	}
+
+	// Verificar si el email ya existe en asesores (solo activos, no eliminados)
 	var existingAdvisor models.Advisor
-	if err := db.DB.Where("email = ?", req.Email).First(&existingAdvisor).Error; err == nil {
+	if err := db.DB.Where("email = ? AND deleted_at IS NULL", req.Email).First(&existingAdvisor).Error; err == nil {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error": "El email ya está registrado",
+			"error": "El email ya está registrado como asesor",
+		})
+	}
+
+	// Verificar si el email ya existe en usuarios (solo activos, no eliminados)
+	var existingUser models.User
+	if err := db.DB.Where("email = ? AND deleted_at IS NULL", req.Email).First(&existingUser).Error; err == nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "El email ya está registrado como usuario",
 		})
 	}
 
@@ -163,6 +187,32 @@ func (h *AdvisorHandler) CreateAdvisor(c *fiber.Ctx) error {
 		activo = *req.Activo
 	}
 
+	// Hashear password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error procesando la contraseña",
+		})
+	}
+
+	// Crear usuario con rol "agente"
+	user := models.User{
+		Nombre:     req.Nombre,
+		Email:      req.Email,
+		Password:   string(hashedPassword),
+		Rol:        models.RoleAgente,
+		Activo:     activo,
+		Verificado: true, // Auto-verificar al crear desde admin
+	}
+
+	if err := db.DB.Create(&user).Error; err != nil {
+		fmt.Printf("❌ ERROR creando usuario: %v\n", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error creando el usuario",
+		})
+	}
+
+	// Crear asesor asociado al usuario
 	advisor := models.Advisor{
 		Nombre:       req.Nombre,
 		Email:        req.Email,
@@ -170,14 +220,20 @@ func (h *AdvisorHandler) CreateAdvisor(c *fiber.Ctx) error {
 		Especialidad: req.Especialidad,
 		ImagenURL:    req.ImagenURL,
 		Activo:       activo,
+		UserID:       &user.ID,
 	}
 
 	if err := db.DB.Create(&advisor).Error; err != nil {
 		fmt.Printf("❌ ERROR creando asesor: %v\n", err)
+		// Rollback: eliminar el usuario creado
+		db.DB.Delete(&user)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error creando el asesor",
 		})
 	}
+
+	// Cargar el usuario en la respuesta
+	advisor.User = &user
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"message": "Asesor creado exitosamente",
@@ -189,6 +245,7 @@ func (h *AdvisorHandler) CreateAdvisor(c *fiber.Ctx) error {
 type UpdateAdvisorRequest struct {
 	Nombre       string `json:"nombre"`
 	Email        string `json:"email"`
+	Password     string `json:"password,omitempty"` // Contraseña para el login (opcional al actualizar)
 	Telefono     string `json:"telefono"`
 	Especialidad string `json:"especialidad"`
 	ImagenURL    string `json:"imagen_url,omitempty"` // URL de la foto de perfil
@@ -197,7 +254,7 @@ type UpdateAdvisorRequest struct {
 
 // UpdateAdvisor - Actualiza un asesor existente
 func (h *AdvisorHandler) UpdateAdvisor(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -213,9 +270,9 @@ func (h *AdvisorHandler) UpdateAdvisor(c *fiber.Ctx) error {
 		})
 	}
 
-	// Buscar asesor existente
+	// Buscar asesor existente con su usuario
 	var advisor models.Advisor
-	if err := db.DB.First(&advisor, id).Error; err != nil {
+	if err := db.DB.Preload("User").First(&advisor, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "Asesor no encontrado",
@@ -236,7 +293,7 @@ func (h *AdvisorHandler) UpdateAdvisor(c *fiber.Ctx) error {
 		}
 	}
 
-	// Actualizar campos solo si se proporcionan
+	// Actualizar campos del asesor solo si se proporcionan
 	if req.Nombre != "" {
 		advisor.Nombre = req.Nombre
 	}
@@ -255,6 +312,43 @@ func (h *AdvisorHandler) UpdateAdvisor(c *fiber.Ctx) error {
 		advisor.Activo = *req.Activo
 	}
 
+	// Actualizar el usuario asociado si existe
+	if advisor.User != nil {
+		// Actualizar nombre y email del usuario
+		if req.Nombre != "" {
+			advisor.User.Nombre = req.Nombre
+		}
+		if req.Email != "" {
+			advisor.User.Email = req.Email
+		}
+		// Actualizar contraseña si se proporciona
+		if req.Password != "" {
+			if len(req.Password) < 6 {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "La contraseña debe tener al menos 6 caracteres",
+				})
+			}
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Error procesando la contraseña",
+				})
+			}
+			advisor.User.Password = string(hashedPassword)
+		}
+		if req.Activo != nil {
+			advisor.User.Activo = *req.Activo
+		}
+
+		// Guardar usuario
+		if err := db.DB.Save(&advisor.User).Error; err != nil {
+			fmt.Printf("❌ ERROR actualizando usuario: %v\n", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error actualizando el usuario",
+			})
+		}
+	}
+
 	if err := db.DB.Save(&advisor).Error; err != nil {
 		fmt.Printf("❌ ERROR actualizando asesor: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -270,7 +364,7 @@ func (h *AdvisorHandler) UpdateAdvisor(c *fiber.Ctx) error {
 
 // DeleteAdvisor - Elimina un asesor (soft delete)
 func (h *AdvisorHandler) DeleteAdvisor(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -279,9 +373,9 @@ func (h *AdvisorHandler) DeleteAdvisor(c *fiber.Ctx) error {
 
 	id := c.Params("id")
 
-	// Verificar que el asesor existe
+	// Verificar que el asesor existe con su usuario
 	var advisor models.Advisor
-	if err := db.DB.First(&advisor, id).Error; err != nil {
+	if err := db.DB.Preload("User").First(&advisor, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "Asesor no encontrado",
@@ -292,12 +386,22 @@ func (h *AdvisorHandler) DeleteAdvisor(c *fiber.Ctx) error {
 		})
 	}
 
-	// Soft delete
+	// Soft delete del asesor
 	if err := db.DB.Delete(&advisor).Error; err != nil {
 		fmt.Printf("❌ ERROR eliminando asesor: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error eliminando el asesor",
 		})
+	}
+
+	// Soft delete del usuario asociado si existe
+	if advisor.User != nil {
+		if err := db.DB.Delete(&advisor.User).Error; err != nil {
+			fmt.Printf("❌ ERROR eliminando usuario: %v\n", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error eliminando el usuario",
+			})
+		}
 	}
 
 	return c.JSON(fiber.Map{
@@ -307,7 +411,7 @@ func (h *AdvisorHandler) DeleteAdvisor(c *fiber.Ctx) error {
 
 // ToggleAdvisorActive - Activa/desactiva un asesor
 func (h *AdvisorHandler) ToggleAdvisorActive(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -316,9 +420,9 @@ func (h *AdvisorHandler) ToggleAdvisorActive(c *fiber.Ctx) error {
 
 	id := c.Params("id")
 
-	// Buscar asesor
+	// Buscar asesor con su usuario
 	var advisor models.Advisor
-	if err := db.DB.First(&advisor, id).Error; err != nil {
+	if err := db.DB.Preload("User").First(&advisor, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "Asesor no encontrado",
@@ -331,6 +435,17 @@ func (h *AdvisorHandler) ToggleAdvisorActive(c *fiber.Ctx) error {
 
 	// Toggle estado
 	advisor.Activo = !advisor.Activo
+
+	// Actualizar el estado del usuario también
+	if advisor.User != nil {
+		advisor.User.Activo = advisor.Activo
+		if err := db.DB.Save(&advisor.User).Error; err != nil {
+			fmt.Printf("❌ ERROR actualizando estado del usuario: %v\n", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error actualizando estado del usuario",
+			})
+		}
+	}
 
 	if err := db.DB.Save(&advisor).Error; err != nil {
 		fmt.Printf("❌ ERROR actualizando estado: %v\n", err)
@@ -354,7 +469,7 @@ func (h *AdvisorHandler) ToggleAdvisorActive(c *fiber.Ctx) error {
 
 // GetPropertyAdvisors - Obtiene todos los asesores asignados a una propiedad
 func (h *AdvisorHandler) GetPropertyAdvisors(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -366,7 +481,7 @@ func (h *AdvisorHandler) GetPropertyAdvisors(c *fiber.Ctx) error {
 	// Obtener las relaciones PropertyAdvisor
 	var propertyAdvisors []models.PropertyAdvisor
 	if err := db.DB.Where("property_id = ?", propertyID).
-		Preload("Advisor").
+		Preload("Advisor.User").
 		Find(&propertyAdvisors).Error; err != nil {
 		fmt.Printf("❌ ERROR obteniendo asesores de propiedad: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -377,7 +492,12 @@ func (h *AdvisorHandler) GetPropertyAdvisors(c *fiber.Ctx) error {
 	// Extraer solo los asesores
 	advisors := make([]models.Advisor, 0, len(propertyAdvisors))
 	for _, pa := range propertyAdvisors {
-		advisors = append(advisors, pa.Advisor)
+		advisor := pa.Advisor
+		// Si el asesor no tiene avatar_url, usar el del usuario asociado
+		if advisor.AvatarURL == "" && advisor.User != nil && advisor.User.AvatarURL != "" {
+			advisor.AvatarURL = advisor.User.AvatarURL
+		}
+		advisors = append(advisors, advisor)
 	}
 
 	return c.JSON(fiber.Map{
@@ -388,7 +508,7 @@ func (h *AdvisorHandler) GetPropertyAdvisors(c *fiber.Ctx) error {
 
 // AssignAdvisorToProperty - Asigna un asesor a una propiedad (soporta múltiples)
 func (h *AdvisorHandler) AssignAdvisorToProperty(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -461,7 +581,7 @@ func (h *AdvisorHandler) AssignAdvisorToProperty(c *fiber.Ctx) error {
 
 // RemoveAdvisorFromProperty - Elimina un asesor de una propiedad
 func (h *AdvisorHandler) RemoveAdvisorFromProperty(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",

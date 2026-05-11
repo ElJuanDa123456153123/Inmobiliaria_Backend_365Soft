@@ -174,6 +174,14 @@ func main() {
 		admin.Delete("/users/:id", userHandler.DeleteUser)
 	}
 
+	// Ruta de migración de datos
+	generalAdminHandler, err := handlers.NewAdminHandler()
+	if err != nil {
+		log.Printf("⚠️  Admin handler general no disponible: %v", err)
+	} else {
+		admin.Post("/migrate-data", generalAdminHandler.MigrateData)
+	}
+
 	// Gestión de Planes (Planes de suscripción)
 	if planHandler != nil {
 		admin.Get("/planes", planHandler.GetPlans)
@@ -235,6 +243,10 @@ func main() {
 
 		// Ruta pública para servir imágenes (ESTA PRIMERO por tener :filename)
 		api.Get("/imagenes/:filename", imageHandler.ServeImage)
+
+		// Rutas para avatares (separadas de las imágenes de propiedades)
+		api.Post("/avatars/upload", middleware.AuthMiddleware(), imageHandler.UploadAvatar)
+		api.Get("/avatars/:filename", imageHandler.ServeAvatar)
 	}
 
 	// Rutas de propiedades

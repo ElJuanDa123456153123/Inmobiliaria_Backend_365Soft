@@ -17,7 +17,7 @@ type AdminHandler struct {
 
 // NewAdminHandler - Crea un nuevo handler de administración
 func NewAdminHandler() (*AdminHandler, error) {
-	dbConfig, err := config.NewDatabase()
+	dbConfig, err := config.GetDatabase()
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func (h *AdminHandler) GetUsers(c *fiber.Ctx) error {
 	var users []models.User
 
 	// Crear nueva conexión por cada request (evita database closed)
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		fmt.Printf("❌ ERROR creando conexión: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -66,7 +66,7 @@ type CreateUserRequest struct {
 
 // CreateUser - Crea un nuevo usuario (Admin access)
 func (h *AdminHandler) CreateUser(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -146,7 +146,7 @@ type UpdateUserRequest struct {
 
 // UpdateUser - Actualiza un usuario existente
 func (h *AdminHandler) UpdateUser(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -242,7 +242,7 @@ func (h *AdminHandler) UpdateUser(c *fiber.Ctx) error {
 
 // ToggleUserActive - Activa/desactiva un usuario
 func (h *AdminHandler) ToggleUserActive(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -288,7 +288,7 @@ func (h *AdminHandler) ToggleUserActive(c *fiber.Ctx) error {
 
 // DeleteUser - Elimina un usuario
 func (h *AdminHandler) DeleteUser(c *fiber.Ctx) error {
-	db, err := config.NewDatabase()
+	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error conectando a base de datos",
@@ -313,4 +313,80 @@ func (h *AdminHandler) DeleteUser(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"message": "Usuario eliminado exitosamente",
 	})
+}
+
+// MigrateData - Migra datos existentes para sincronizar usuarios y asesores,
+// y actualizar propiedades para mostrar vendedor por defecto
+func (h *AdminHandler) MigrateData(c *fiber.Ctx) error {
+	db, err := config.GetDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	results := fiber.Map{
+		"propiedades_actualizadas": 0,
+		"asesores_creados":         0,
+		"errores":                  []string{},
+	}
+
+	// 1. Actualizar todas las propiedades para que mostrar_vendedor = true
+	fmt.Println("🔄 Iniciando migración de mostrar_vendedor en propiedades...")
+	var propsUpdated int64
+	if err := db.DB.Model(&models.Property{}).
+		Where("mostrar_vendedor = ? OR mostrar_vendedor IS NULL", false).
+		Update("mostrar_vendedor", true).Error; err != nil {
+		fmt.Printf("❌ Error actualizando propiedades: %v\n", err)
+		results["errores"] = append(results["errores"].([]string), fmt.Sprintf("Error actualizando propiedades: %v", err))
+	} else {
+		propsUpdated = db.DB.RowsAffected
+		results["propiedades_actualizadas"] = int(propsUpdated)
+		fmt.Printf("✅ Propiedades actualizadas: %d\n", propsUpdated)
+	}
+
+	// 2. Crear registros en asesores para usuarios con rol "agente" que no tengan uno
+	fmt.Println("🔄 Iniciando migración de asesores para usuarios con rol 'agente'...")
+
+	// Buscar usuarios con rol "agente" sin asesor correspondiente
+	var users []models.User
+	if err := db.DB.Where("rol = ? AND deleted_at IS NULL", models.RoleAgente).Find(&users).Error; err != nil {
+		fmt.Printf("❌ Error buscando usuarios: %v\n", err)
+		results["errores"] = append(results["errores"].([]string), fmt.Sprintf("Error buscando usuarios: %v", err))
+		return c.Status(fiber.StatusInternalServerError).JSON(results)
+	}
+
+	advisorsCreated := 0
+	for _, user := range users {
+		// Verificar si ya existe un asesor para este usuario
+		var existingAdvisor models.Advisor
+		if err := db.DB.Where("user_id = ?", user.ID).First(&existingAdvisor).Error; err == nil {
+			// Ya existe, continuar
+			continue
+		}
+
+		// Crear nuevo asesor
+		advisor := models.Advisor{
+			Nombre:    user.Nombre,
+			Email:     user.Email,
+			Telefono:  user.Telefono,
+			AvatarURL: user.AvatarURL,
+			Activo:    user.Activo,
+			UserID:    &user.ID,
+		}
+
+		if err := db.DB.Create(&advisor).Error; err != nil {
+			fmt.Printf("❌ Error creando asesor para usuario %d: %v\n", user.ID, err)
+			results["errores"] = append(results["errores"].([]string), fmt.Sprintf("Error creando asesor para usuario %d: %v", user.ID, err))
+		} else {
+			advisorsCreated++
+			fmt.Printf("✅ Asesor creado para usuario %d (%s)\n", user.ID, user.Nombre)
+		}
+	}
+
+	results["asesores_creados"] = advisorsCreated
+
+	fmt.Printf("✅ Migración completada: %d propiedades actualizadas, %d asesores creados\n", propsUpdated, advisorsCreated)
+
+	return c.JSON(results)
 }

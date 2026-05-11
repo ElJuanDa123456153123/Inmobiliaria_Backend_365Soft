@@ -283,3 +283,155 @@ func (h *ImageHandler) ServeImage(c *fiber.Ctx) error {
 	// Servir el archivo
 	return c.SendFile(filepath)
 }
+
+// UploadAvatar - Sube una imagen de avatar y la guarda como WEBP
+func (h *ImageHandler) UploadAvatar(c *fiber.Ctx) error {
+	fmt.Println("📤 UploadAvatar llamado")
+
+	// Obtener archivo del formulario
+	file, err := c.FormFile("image")
+	if err != nil {
+		fmt.Printf("❌ Error obteniendo archivo del formulario: %v\n", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "No se proporcionó ninguna imagen",
+		})
+	}
+
+	fmt.Printf("✅ Archivo recibido: %s (tamaño: %d bytes)\n", file.Filename, file.Size)
+
+	// Validar tamaño máximo (5MB para avatares)
+	const maxFileSize = 5 * 1024 * 1024
+	if file.Size > maxFileSize {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "La imagen es demasiado grande. Máximo 5MB",
+		})
+	}
+
+	// Abrir el archivo
+	src, err := file.Open()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error al abrir el archivo",
+		})
+	}
+	defer src.Close()
+
+	// Decodificar la imagen para validar que sea una imagen real
+	img, format, err := image.Decode(src)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "El archivo no es una imagen válida",
+		})
+	}
+
+	// Validar formato
+	if format != "jpeg" && format != "png" && format != "webp" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Formato no soportado. Solo JPEG, PNG y WebP",
+		})
+	}
+
+	// Crear directorio de uploads para avatares si no existe
+	uploadDir := "uploads/avatars"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		fmt.Printf("❌ Error creando directorio '%s': %v\n", uploadDir, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":          fmt.Sprintf("Error al crear directorio de uploads: %s", uploadDir),
+			"detailed_error": err.Error(),
+			"upload_dir":     uploadDir,
+		})
+	}
+
+	// Generar nombre único para el archivo
+	timestamp := time.Now().Unix()
+	filename := fmt.Sprintf("avatar-%d.png", timestamp)
+	filepath := stdpath.Join(uploadDir, filename)
+
+	// Redimensionar avatar a máximo 400x400 (suficiente para perfil)
+	var avatarImg image.Image
+	if img.Bounds().Dx() > 400 || img.Bounds().Dy() > 400 {
+		avatarImg = imaging.Fit(img, 400, 400, imaging.Lanczos)
+	} else {
+		avatarImg = img
+	}
+
+	// Guardar como WEBP (formato moderno y compresión excelente)
+	out, err := os.Create(filepath)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error al crear el archivo",
+		})
+	}
+	defer out.Close()
+
+	// Guardar como PNG (formato más compatible y sin pérdida de calidad)
+	// NOTA: Si se desea WEBP en el futuro, se necesita una librería adicional
+	if err := png.Encode(out, avatarImg); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error al codificar la imagen",
+		})
+	}
+
+	// Retornar la URL del avatar (URL completa)
+	// En desarrollo, usar localhost:3001 para que el navegador pueda acceder
+	// En producción, usar el host real de la request
+	var avatarURL string
+
+	// Verificar si estamos en desarrollo por variable de entorno
+	if os.Getenv("APP_ENV") == "development" {
+		// En desarrollo, siempre usar localhost:3001
+		avatarURL = fmt.Sprintf("http://localhost:3001/api/avatars/%s", filename)
+	} else {
+		// En producción, usar el host de la request
+		host := c.Get("Host")
+		if host == "" {
+			host = "localhost:3001"
+		}
+
+		// Determinar protocolo
+		protocol := "http"
+		if c.Protocol() == "https" || c.Get("X-Forwarded-Proto") == "https" {
+			protocol = "https"
+		}
+
+		avatarURL = fmt.Sprintf("%s://%s/api/avatars/%s", protocol, host, filename)
+	}
+
+	fmt.Printf("✅ Avatar guardado exitosamente: %s\n", filepath)
+	fmt.Printf("🔗 URL generada: %s\n", avatarURL)
+
+	return c.JSON(fiber.Map{
+		"message":  "Avatar subido exitosamente",
+		"url":      avatarURL,
+		"filename": filename,
+		"width":    avatarImg.Bounds().Dx(),
+		"height":   avatarImg.Bounds().Dy(),
+	})
+}
+
+// ServeAvatar - Sirve una imagen de avatar desde el sistema de archivos
+func (h *ImageHandler) ServeAvatar(c *fiber.Ctx) error {
+	filename := c.Params("filename")
+
+	// Validar que no contenga path traversal
+	if strings.Contains(filename, "..") {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Nombre de archivo inválido",
+		})
+	}
+
+	// Construir ruta completa
+	filepath := stdpath.Join("uploads/avatars", filename)
+
+	// Verificar que el archivo existe
+	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+		fmt.Printf("⚠️  Avatar no encontrado: %s\n", filepath)
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error":    "Avatar no encontrado",
+			"filename": filename,
+		})
+	}
+
+	// Servir el archivo
+	return c.SendFile(filepath)
+}
