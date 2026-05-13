@@ -24,11 +24,10 @@ func NewPlanHandler() (*PlanHandler, error) {
 	}, nil
 }
 
-// GetPlans - Obtiene todos los planes (Público/Admin)
+// GetPlans - Obtiene todos los planes (Admin - muestra todos incluyendo inactivos)
 func (h *PlanHandler) GetPlans(c *fiber.Ctx) error {
 	var planes []models.Plan
 
-	// Si no es admin, quizás solo mostrar activos. Por ahora mostramos todos ordenados.
 	if err := h.DB.Order("orden asc").Find(&planes).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error obteniendo planes",
@@ -40,12 +39,27 @@ func (h *PlanHandler) GetPlans(c *fiber.Ctx) error {
 	})
 }
 
-// GetPlan - Obtiene un plan por ID
+// GetActivePlans - Obtiene solo los planes activos (Público - para la página de publicar)
+func (h *PlanHandler) GetActivePlans(c *fiber.Ctx) error {
+	var planes []models.Plan
+
+	if err := h.DB.Where("activo = ?", true).Order("orden asc").Find(&planes).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo planes",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"planes": planes,
+	})
+}
+
+// GetPlan - Obtiene un plan por ID (solo activos para público)
 func (h *PlanHandler) GetPlan(c *fiber.Ctx) error {
 	id := c.Params("id")
 	var plan models.Plan
 
-	if err := h.DB.First(&plan, id).Error; err != nil {
+	if err := h.DB.Where("activo = ?", true).First(&plan, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "Plan no encontrado",
@@ -129,3 +143,4 @@ func (h *PlanHandler) DeletePlan(c *fiber.Ctx) error {
 		"message": "Plan eliminado exitosamente",
 	})
 }
+

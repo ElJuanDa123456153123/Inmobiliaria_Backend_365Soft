@@ -190,9 +190,9 @@ func main() {
 		admin.Delete("/planes/:id", planHandler.DeletePlan)
 	}
 
-	// Rutas Públicas de Planes
+	// Rutas Públicas de Planes (solo activos)
 	if planHandler != nil {
-		api.Get("/planes", planHandler.GetPlans)
+		api.Get("/planes", planHandler.GetActivePlans)
 		api.Get("/planes/:id", planHandler.GetPlan)
 	}
 

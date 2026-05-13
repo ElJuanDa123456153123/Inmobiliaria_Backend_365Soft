@@ -69,3 +69,5 @@ nul
 
 # Archivos subidos por usuarios
 uploads/
+
+out.json
