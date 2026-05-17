@@ -185,6 +185,7 @@ func (r *PropertyRepository) List(listParams ListPropertyParams) ([]models.Prope
 		Preload("PropertyImages", func(db *gorm.DB) *gorm.DB {
 			return db.Order("principal DESC, orden ASC")
 		}).
+		Preload("PropertyAdvisors.Advisor"). // Incluir múltiples asesores asignados
 		Order(orderByColumn + " " + listParams.Order).
 		Limit(listParams.Limit).
 		Offset(listParams.Offset).

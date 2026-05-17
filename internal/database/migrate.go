@@ -91,24 +91,40 @@ func migratePropertyImageURL(db *config.Database) error {
 }
 
 // MigrateExistingData - Migra datos existentes para sincronizar usuarios y asesores,
-// y actualizar propiedades para mostrar vendedor por defecto
+// y actualizar propiedades para mostrar 365Soft por defecto (mostrar_vendedor=false, mostrar_agencia=false)
 func MigrateExistingData(db *config.Database) error {
 	log.Println("🔄 Verificando datos existentes para migrar...")
 
-	// 1. Actualizar todas las propiedades para que mostrar_vendedor = true
+	// 1. Agregar columna mostrar_agencia si no existe (GORM AutoMigrate lo hace, pero aseguramos datos)
+	// GORM AutoMigrate ya agregó la columna con default:false
+
+	// 2. Actualizar propiedades para mostrar_vendedor = false (365Soft por defecto)
 	var propsUpdated int64
 	if err := db.DB.Model(&models.Property{}).
-		Where("mostrar_vendedor = ? OR mostrar_vendedor IS NULL", false).
-		Update("mostrar_vendedor", true).Error; err != nil {
-		log.Printf("❌ Error actualizando propiedades: %v\n", err)
+		Where("mostrar_vendedor IS NULL").
+		Update("mostrar_vendedor", false).Error; err != nil {
+		log.Printf("❌ Error actualizando mostrar_vendedor: %v\n", err)
 	} else {
 		propsUpdated = db.DB.RowsAffected
 		if propsUpdated > 0 {
-			log.Printf("✅ Propiedades actualizadas (mostrar_vendedor=true): %d\n", propsUpdated)
+			log.Printf("✅ Propiedades actualizadas (mostrar_vendedor=false): %d\n", propsUpdated)
 		}
 	}
 
-	// 2. Crear registros en asesores para usuarios con rol "agente" que no tengan uno
+	// 3. Asegurar que mostrar_agencia tenga valor (false por defecto)
+	var agenciaUpdated int64
+	if err := db.DB.Model(&models.Property{}).
+		Where("mostrar_agencia IS NULL").
+		Update("mostrar_agencia", false).Error; err != nil {
+		log.Printf("❌ Error actualizando mostrar_agencia: %v\n", err)
+	} else {
+		agenciaUpdated = db.DB.RowsAffected
+		if agenciaUpdated > 0 {
+			log.Printf("✅ Propiedades actualizadas (mostrar_agencia=false): %d\n", agenciaUpdated)
+		}
+	}
+
+	// 4. Crear registros en asesores para usuarios con rol "agente" que no tengan uno
 	var users []models.User
 	if err := db.DB.Where("rol = ? AND deleted_at IS NULL", models.RoleAgente).Find(&users).Error; err != nil {
 		log.Printf("❌ Error buscando usuarios con rol agente: %v\n", err)
@@ -146,8 +162,8 @@ func MigrateExistingData(db *config.Database) error {
 		log.Printf("✅ Total de asesores creados: %d\n", advisorsCreated)
 	}
 
-	if propsUpdated > 0 || advisorsCreated > 0 {
-		log.Printf("🎉 Migración de datos completada: %d propiedades actualizadas, %d asesores creados\n", propsUpdated, advisorsCreated)
+	if propsUpdated > 0 || agenciaUpdated > 0 || advisorsCreated > 0 {
+		log.Printf("🎉 Migración de datos completada: %d propiedades actualizadas (vendedor), %d propiedades actualizadas (agencia), %d asesores creados\n", propsUpdated, agenciaUpdated, advisorsCreated)
 	}
 
 	return nil
