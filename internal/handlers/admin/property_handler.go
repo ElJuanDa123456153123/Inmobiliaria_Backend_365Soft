@@ -361,6 +361,8 @@ type UpdatePropertyRequest struct {
 	TerminosCondiciones *string   `json:"terminos_condiciones"`
 	AdvisorID           *uint     `json:"advisor_id"`
 	MostrarVendedor     *bool     `json:"mostrar_vendedor"`
+	MostrarAgencia      *bool     `json:"mostrar_agencia"`
+	AgenciaNombrePersonalizado *string `json:"agencia_nombre_personalizado"`
 }
 
 // UpdateProperty - Actualiza una propiedad
@@ -472,6 +474,12 @@ func (h *PropertyHandler) UpdateProperty(c *fiber.Ctx) error {
 	}
 	if req.MostrarVendedor != nil {
 		updateData["mostrar_vendedor"] = *req.MostrarVendedor
+	}
+	if req.MostrarAgencia != nil {
+		updateData["mostrar_agencia"] = *req.MostrarAgencia
+	}
+	if req.AgenciaNombrePersonalizado != nil {
+		updateData["agencia_nombre_personalizado"] = strings.TrimSpace(*req.AgenciaNombrePersonalizado)
 	}
 
 	idUint, _ := strconv.ParseUint(id, 10, 32)

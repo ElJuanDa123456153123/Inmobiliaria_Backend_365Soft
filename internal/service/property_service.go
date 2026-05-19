@@ -701,6 +701,12 @@ func (s *PropertyService) UpdateProperty(id uint, updates map[string]interface{}
 	if mostrarVendedor, ok := updates["mostrar_vendedor"].(bool); ok {
 		property.MostrarVendedor = mostrarVendedor
 	}
+	if mostrarAgencia, ok := updates["mostrar_agencia"].(bool); ok {
+		property.MostrarAgencia = mostrarAgencia
+	}
+	if agenciaNombrePersonalizado, ok := updates["agencia_nombre_personalizado"].(string); ok {
+		property.AgenciaNombrePersonalizado = agenciaNombrePersonalizado
+	}
 
 	// Guardar cambios
 	if err := s.PropertyRepo.Update(property); err != nil {
