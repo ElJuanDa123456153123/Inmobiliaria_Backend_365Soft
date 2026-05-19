@@ -111,6 +111,12 @@ func main() {
 		// No es fatal, continuar sin image handler
 	}
 
+	// Inicializar handler de favoritos
+	favoriteHandler, err := handlers.NewFavoriteHandler()
+	if err != nil {
+		log.Printf("⚠️  Favorite handler no disponible: %v", err)
+	}
+
 	// Inicializar handler de WebSocket (para actualizaciones en tiempo real)
 	var wsHandler *handlers.WebSocketHandler
 	if propertyHandler != nil && propertyHandler.Redis != nil {
@@ -266,6 +272,14 @@ func main() {
 		// Rutas protegidas restantes
 		api.Post("/properties", middleware.AuthMiddleware(), propertyHandler.CreateProperty)              // Crear propiedad (requiere login)
 		api.Delete("/properties/:id", middleware.AuthMiddleware(), propertyHandler.DeleteProperty)        // Eliminar propiedad (requiere login)
+	}
+
+	// Rutas de favoritos
+	if favoriteHandler != nil {
+		api.Post("/favorites", middleware.AuthMiddleware(), favoriteHandler.AddFavorite)
+		api.Get("/favorites", middleware.AuthMiddleware(), favoriteHandler.GetFavorites)
+		api.Delete("/favorites/:id", middleware.AuthMiddleware(), favoriteHandler.RemoveFavorite)
+		api.Get("/favorites/check/:propertyId", middleware.AuthMiddleware(), favoriteHandler.CheckFavorite)
 	}
 
 	// 🚀 WebSocket para actualizaciones en tiempo real
