@@ -7,6 +7,7 @@ import (
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers"
 	adminhandlers "github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers/admin"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/middleware"
+	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/jobs"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/websocket/v2"
@@ -115,6 +116,12 @@ func main() {
 	favoriteHandler, err := handlers.NewFavoriteHandler()
 	if err != nil {
 		log.Printf("⚠️  Favorite handler no disponible: %v", err)
+	}
+
+	// Inicializar handler de búsquedas guardadas
+	savedSearchHandler, err := handlers.NewSavedSearchHandler()
+	if err != nil {
+		log.Printf("⚠️  Saved search handler no disponible: %v", err)
 	}
 
 	// Inicializar handler de WebSocket (para actualizaciones en tiempo real)
@@ -282,6 +289,18 @@ func main() {
 		api.Get("/favorites/check/:propertyId", middleware.AuthMiddleware(), favoriteHandler.CheckFavorite)
 	}
 
+	// Rutas de búsquedas guardadas y notificaciones
+	if savedSearchHandler != nil {
+		api.Post("/saved-searches", middleware.AuthMiddleware(), savedSearchHandler.CreateSavedSearch)
+		api.Get("/saved-searches", middleware.AuthMiddleware(), savedSearchHandler.GetSavedSearches)
+		api.Delete("/saved-searches/:id", middleware.AuthMiddleware(), savedSearchHandler.DeleteSavedSearch)
+		api.Patch("/saved-searches/:id/toggle", middleware.AuthMiddleware(), savedSearchHandler.ToggleSavedSearch)
+		api.Get("/saved-searches/:id/matches", middleware.AuthMiddleware(), savedSearchHandler.GetSavedSearchMatches)
+
+		api.Get("/notifications", middleware.AuthMiddleware(), savedSearchHandler.GetNotifications)
+		api.Patch("/notifications/read", middleware.AuthMiddleware(), savedSearchHandler.MarkNotificationsAsRead)
+	}
+
 	// 🚀 WebSocket para actualizaciones en tiempo real
 	if wsHandler != nil {
 		// WebSocket upgrade endpoint
@@ -337,6 +356,16 @@ func main() {
 		log.Printf("🧹 Job de limpieza iniciado: Retención=%d días, Intervalo=%d horas\n", retentionDays, intervalHours)
 	}
 	*/
+
+	// 🔍 Iniciar Worker de Búsquedas Guardadas en background
+	savedSearchWorker, err := jobs.NewSavedSearchWorker()
+	if err != nil {
+		log.Printf("⚠️  Error iniciando worker de búsquedas guardadas: %v\n", err)
+	} else {
+		// Ejecutar verificación cada 1 minuto en desarrollo local para feedback inmediato
+		go savedSearchWorker.StartWorkerScheduler(1)
+		log.Println("🔔 Worker de Búsquedas Guardadas iniciado (Intervalo = 1 minuto)")
+	}
 
 	log.Fatal(app.Listen(":3001"))
 }

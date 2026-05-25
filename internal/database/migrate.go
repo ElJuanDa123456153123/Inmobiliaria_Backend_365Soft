@@ -27,6 +27,8 @@ func AutoMigrate() error {
 		&models.AuditLog{},         // 🔒 Auditoría
 		&models.Plan{},             // 📋 Planes de suscripción
 		&models.Favorite{},         // ❤️ Favoritos
+		&models.SavedSearch{},      // 🔍 Búsquedas guardadas
+		&models.Notification{},     // 🔔 Notificaciones
 	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)
