@@ -124,6 +124,12 @@ func main() {
 		log.Printf("⚠️  Saved search handler no disponible: %v", err)
 	}
 
+	// Inicializar handler de historial de vistas
+	viewHistoryHandler, err := handlers.NewViewHistoryHandler()
+	if err != nil {
+		log.Printf("⚠️  View history handler no disponible: %v", err)
+	}
+
 	// Inicializar handler de WebSocket (para actualizaciones en tiempo real)
 	var wsHandler *handlers.WebSocketHandler
 	if propertyHandler != nil && propertyHandler.Redis != nil {
@@ -299,6 +305,14 @@ func main() {
 
 		api.Get("/notifications", middleware.AuthMiddleware(), savedSearchHandler.GetNotifications)
 		api.Patch("/notifications/read", middleware.AuthMiddleware(), savedSearchHandler.MarkNotificationsAsRead)
+	}
+
+	// Rutas de historial de vistas
+	if viewHistoryHandler != nil {
+		api.Post("/view-history", middleware.AuthMiddleware(), viewHistoryHandler.RecordView)
+		api.Get("/view-history", middleware.AuthMiddleware(), viewHistoryHandler.GetViewHistory)
+		api.Delete("/view-history", middleware.AuthMiddleware(), viewHistoryHandler.ClearViewHistory)
+		api.Delete("/view-history/:id", middleware.AuthMiddleware(), viewHistoryHandler.DeleteViewHistoryItem)
 	}
 
 	// 🚀 WebSocket para actualizaciones en tiempo real
