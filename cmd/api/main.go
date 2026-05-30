@@ -97,6 +97,11 @@ func main() {
 		log.Printf("⚠️  Property admin handler no disponible: %v", err)
 	}
 
+	analyticsHandler, err := adminhandlers.NewAnalyticsHandler()
+	if err != nil {
+		log.Printf("⚠️  Analytics admin handler no disponible: %v", err)
+	}
+
 	// Inicializar handler de planes
 	planHandler, err := handlers.NewPlanHandler()
 	if err != nil {
@@ -191,6 +196,11 @@ func main() {
 		admin.Put("/users/:id", userHandler.UpdateUser)
 		admin.Patch("/users/:id/toggle-active", userHandler.ToggleUserActive)
 		admin.Delete("/users/:id", userHandler.DeleteUser)
+	}
+
+	// Ruta de Analytics Dashboard
+	if analyticsHandler != nil {
+		admin.Get("/analytics", analyticsHandler.GetAnalytics)
 	}
 
 	// Ruta de migración de datos
