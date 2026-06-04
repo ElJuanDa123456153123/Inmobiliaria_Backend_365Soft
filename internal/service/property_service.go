@@ -10,6 +10,7 @@ import (
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/repository"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/pkg/errors"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 // PropertyService - Servicio de lógica de negocio para propiedades
@@ -18,6 +19,7 @@ type PropertyService struct {
 	ImageRepo    repository.PropertyImageRepositoryInterface
 	UserRepo     repository.UserRepositoryInterface
 	AuditRepo    repository.AuditRepositoryInterface
+	db           *gorm.DB
 }
 
 // NewPropertyService - Crea un nuevo servicio de propiedades
@@ -26,12 +28,14 @@ func NewPropertyService(
 	imageRepo repository.PropertyImageRepositoryInterface,
 	userRepo repository.UserRepositoryInterface,
 	auditRepo repository.AuditRepositoryInterface,
+	db *gorm.DB,
 ) *PropertyService {
 	return &PropertyService{
 		PropertyRepo: propertyRepo,
 		ImageRepo:    imageRepo,
 		UserRepo:     userRepo,
 		AuditRepo:    auditRepo,
+		db:           db,
 	}
 }
 
@@ -118,6 +122,27 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 	// 🔒 Sanitización HTML (se hace en el handler, pero podría hacerse aquí también)
 	// Crear propiedad
 	now := time.Now()
+
+	// Calcular fecha de expiración basada en la duración del plan
+	var fechaExpiracion *time.Time
+	if req.UserID != 0 {
+		// Buscar suscripción activa del usuario
+		var subscription models.Subscription
+		if err := s.db.Where("user_id = ? AND estado = ? AND seleccionada = ?", req.UserID, "ACTIVA", true).
+			Preload("Plan").
+			First(&subscription).Error; err == nil {
+			// Usar la duración del plan para calcular la expiración de la propiedad
+			if subscription.Plan != nil && subscription.Plan.DuracionPropiedadMinutos > 0 {
+				fechaExpiracionCalc := now.Add(time.Duration(subscription.Plan.DuracionPropiedadMinutos) * time.Minute)
+				fechaExpiracion = &fechaExpiracionCalc
+				fmt.Printf("⏰ Propiedad expirará en %d minutos (plan: %s): %s\n",
+					subscription.Plan.DuracionPropiedadMinutos,
+					subscription.Plan.Nombre,
+					fechaExpiracionCalc.Format("2006-01-02 15:04:05"))
+			}
+		}
+	}
+
 	property := &models.Property{
 		UserID:           req.UserID,
 		Titulo:           req.Titulo,
@@ -157,6 +182,7 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 		Destacado:           false,
 		VistasContador:      0,
 		FechaPublicacion:    &now,
+		FechaExpiracion:     fechaExpiracion, // Fecha en que se eliminará automáticamente
 		AdvisorID:           req.AdvisorID,
 	}
 
@@ -184,6 +210,17 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 	// Guardar propiedad
 	if err := s.PropertyRepo.Create(property); err != nil {
 		return nil, errors.DatabaseError(err)
+	}
+
+	// Incrementar contador de propiedades usadas en la suscripción (si no es admin)
+	if req.UserID != 0 {
+		if err := s.db.Model(&models.Subscription{}).
+			Where("user_id = ? AND estado = ?", req.UserID, "ACTIVA").
+			UpdateColumn("propiedades_usadas", gorm.Expr("propiedades_usadas + ?", 1)).
+			Error; err != nil {
+			fmt.Printf("⚠️  Error incrementando contador de propiedades: %v\n", err)
+			// No fallar la creación de la propiedad si falla el contador
+		}
 	}
 
 	// Guardar imágenes
@@ -247,6 +284,9 @@ func (s *PropertyService) UpdatePropertyStatus(req *UpdatePropertyStatusRequest)
 		return nil, errors.Forbidden("No tienes permiso para modificar esta propiedad")
 	}
 
+	// ✅ El dueño SIEMPRE puede editar sus propiedades (sin restricción de suscripción)
+	// Esto es un derecho de propiedad sobre sus propias publicaciones
+
 	// Validar estado
 	validStatuses := map[models.PropertyStatus]bool{
 		models.PropertyStatusActivo:    true,
@@ -283,6 +323,30 @@ func (s *PropertyService) DeleteProperty(req *DeletePropertyRequest) error {
 	// Verificar propiedad pertenezca al usuario
 	if property.UserID != req.UserID {
 		return errors.Forbidden("No tienes permiso para eliminar esta propiedad")
+	}
+
+	// ✅ El dueño SIEMPRE puede eliminar sus propiedades (sin restricción de suscripción)
+
+	// Buscar la suscripción del usuario para decrementar el contador si el plan lo permite
+	if req.UserID != 0 {
+		var subscription models.Subscription
+		err := s.db.Where("user_id = ?", req.UserID).First(&subscription).Error
+		if err == nil {
+			// Obtener el plan para verificar si permite republicación
+			var plan models.Plan
+			if err := s.db.First(&plan, subscription.PlanID).Error; err == nil {
+				if plan.PermitirRepublicacion && subscription.PropiedadesUsadas > 0 {
+					// Decrementar el contador
+					s.db.Model(&subscription).
+						Where("propiedades_usadas > 0").
+						UpdateColumn("propiedades_usadas", gorm.Expr("propiedades_usadas - 1"))
+
+					fmt.Printf("✅ [ELIMINAR] Contador decrementado: Plan '%s' permite republicación\n", plan.Nombre)
+				} else {
+					fmt.Printf("⚠️  [ELIMINAR] Contador NO decrementado: Plan '%s' NO permite republicación\n", plan.Nombre)
+				}
+			}
+		}
 	}
 
 	// Soft delete

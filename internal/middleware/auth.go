@@ -107,7 +107,7 @@ func AuthMiddleware() fiber.Handler {
 
 		// Inyectar usuario en el contexto
 		c.Locals("user", &user)
-		c.Locals("userID", user.ID)
+		c.Locals("user_id", user.ID)
 
 		// Continuar al siguiente handler
 		return c.Next()

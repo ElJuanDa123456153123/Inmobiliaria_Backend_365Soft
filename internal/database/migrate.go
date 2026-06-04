@@ -31,6 +31,8 @@ func AutoMigrate() error {
 		&models.Notification{},     // 🔔 Notificaciones
 		&models.ViewHistory{},      // 👁️ Historial de vistas
 		&models.Payment{},          // 💳 Pagos y suscripciones
+		&models.QrPago{},           // 💳 Pagos QR (Banco MC4)
+		&models.Subscription{},     // 📦 Suscripciones de usuarios
 	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)

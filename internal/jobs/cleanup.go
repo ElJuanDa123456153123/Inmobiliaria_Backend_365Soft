@@ -127,6 +127,88 @@ func extractThumbnailFilename(imageURL string) string {
 	return filename + "-thumb"
 }
 
+// DeleteExpiredProperties - Elimina propiedades que han expirado
+func (j *CleanupJob) DeleteExpiredProperties() error {
+	fmt.Printf("🔍 Buscando propiedades expiradas...\n")
+
+	// Buscar propiedades donde la fecha de expiración es menor a ahora
+	var expiredProperties []models.Property
+	now := time.Now()
+	err := j.DB.DB.Where("fecha_expiracion IS NOT NULL AND fecha_expiracion < ?", now).
+		Find(&expiredProperties).Error
+	if err != nil {
+		fmt.Printf("❌ Error buscando propiedades expiradas: %v\n", err)
+		return err
+	}
+
+	if len(expiredProperties) == 0 {
+		fmt.Println("✅ No hay propiedades expiradas para eliminar")
+		return nil
+	}
+
+	fmt.Printf("📦 Encontradas %d propiedades expiradas para eliminar\n", len(expiredProperties))
+
+	// Para cada propiedad, eliminarla junto con sus imágenes
+	totalDeleted := 0
+	for _, property := range expiredProperties {
+		fmt.Printf("🗑️  Eliminando propiedad ID %d (%s) - Expiró: %s\n",
+			property.ID, property.Titulo, property.FechaExpiracion.Format("2006-01-02 15:04"))
+
+		// Buscar imágenes de la propiedad
+		var images []models.PropertyImage
+		err := j.DB.DB.Where("property_id = ?", property.ID).Find(&images).Error
+		if err != nil {
+			fmt.Printf("⚠️  Error buscando imágenes de propiedad %d: %v\n", property.ID, err)
+		}
+
+		// Eliminar archivos físicos de imágenes
+		for _, image := range images {
+			imagePath := fmt.Sprintf("uploads/imagenes/%s", extractFilename(image.ImageURL))
+			thumbnailPath := fmt.Sprintf("uploads/imagenes/%s", extractThumbnailFilename(image.ImageURL))
+
+			// Eliminar archivo principal
+			if err := os.Remove(imagePath); err != nil {
+				if !os.IsNotExist(err) {
+					fmt.Printf("⚠️  Error eliminando %s: %v\n", imagePath, err)
+				}
+			}
+
+			// Eliminar thumbnail
+			if err := os.Remove(thumbnailPath); err != nil {
+				if !os.IsNotExist(err) {
+					fmt.Printf("⚠️  Error eliminando thumbnail %s: %v\n", thumbnailPath, err)
+				}
+			}
+		}
+
+		// Soft delete de la propiedad (GORM lo marca como deleted)
+		if err := j.DB.DB.Delete(&property).Error; err != nil {
+			fmt.Printf("❌ Error eliminando propiedad %d: %v\n", property.ID, err)
+		} else {
+			fmt.Printf("✅ Propiedad ID %d eliminada correctamente\n", property.ID)
+			totalDeleted++
+		}
+	}
+
+	fmt.Printf("🎉 Eliminación completada. %d propiedades eliminadas\n", totalDeleted)
+	return nil
+}
+
+// StartExpirationScheduler - Inicia el scheduler para verificar y eliminar propiedades expiradas
+func (j *CleanupJob) StartExpirationScheduler(intervalMinutes int) {
+	fmt.Printf("⏰ Scheduler de expiración iniciado: Verificando cada %d minutos\n", intervalMinutes)
+
+	ticker := time.NewTicker(time.Duration(intervalMinutes) * time.Minute)
+	defer ticker.Stop()
+
+	// Ejecutar inmediatamente al inicio
+	j.DeleteExpiredProperties()
+
+	for range ticker.C {
+		j.DeleteExpiredProperties()
+	}
+}
+
 // StartCleanupScheduler - Inicia el scheduler para ejecutar la limpieza periódicamente
 func (j *CleanupJob) StartCleanupScheduler(retentionDays int, intervalHours int) {
 	fmt.Printf("⏰ Scheduler iniciado: Ejecutando limpieza cada %d horas\n", intervalHours)

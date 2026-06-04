@@ -34,7 +34,7 @@ func NewPropertyHandler() (*PropertyHandler, error) {
 	auditRepo := repository.NewAuditRepository(db)
 
 	// Inicializar servicio
-	propertyService := service.NewPropertyService(propertyRepo, imageRepo, userRepo, auditRepo)
+	propertyService := service.NewPropertyService(propertyRepo, imageRepo, userRepo, auditRepo, db.DB)
 
 	// Inicializar Redis (opcional, si falla continúa sin caché)
 	var redis *config.RedisClient

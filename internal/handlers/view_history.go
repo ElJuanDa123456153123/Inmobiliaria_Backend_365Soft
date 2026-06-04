@@ -30,7 +30,7 @@ func NewViewHistoryHandler() (*ViewHistoryHandler, error) {
 
 // RecordView - Registra una vista de propiedad (POST /api/view-history)
 func (h *ViewHistoryHandler) RecordView(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	type Request struct {
 		PropertyID uint `json:"property_id"`
@@ -76,7 +76,7 @@ func (h *ViewHistoryHandler) RecordView(c *fiber.Ctx) error {
 
 // GetViewHistory - Obtiene el historial de vistas del usuario (GET /api/view-history)
 func (h *ViewHistoryHandler) GetViewHistory(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	// Paginación
 	page, _ := strconv.Atoi(c.Query("page", "1"))
@@ -118,7 +118,7 @@ func (h *ViewHistoryHandler) GetViewHistory(c *fiber.Ctx) error {
 
 // ClearViewHistory - Limpia todo el historial del usuario (DELETE /api/view-history)
 func (h *ViewHistoryHandler) ClearViewHistory(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	result := h.DB.Where("user_id = ?", userID).Delete(&models.ViewHistory{})
 	if result.Error != nil {
@@ -133,7 +133,7 @@ func (h *ViewHistoryHandler) ClearViewHistory(c *fiber.Ctx) error {
 
 // DeleteViewHistoryItem - Elimina un registro del historial (DELETE /api/view-history/:id)
 func (h *ViewHistoryHandler) DeleteViewHistoryItem(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 	viewID := c.Params("id")
 
 	result := h.DB.Where("id = ? AND user_id = ?", viewID, userID).Delete(&models.ViewHistory{})

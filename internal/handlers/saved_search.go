@@ -30,7 +30,7 @@ func NewSavedSearchHandler() (*SavedSearchHandler, error) {
 
 // CreateSavedSearch - Guarda una nueva búsqueda de filtros
 func (h *SavedSearchHandler) CreateSavedSearch(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	type Request struct {
 		Nombre  string                 `json:"nombre"`
@@ -74,7 +74,7 @@ func (h *SavedSearchHandler) CreateSavedSearch(c *fiber.Ctx) error {
 
 // GetSavedSearches - Obtiene todas las búsquedas guardadas del usuario
 func (h *SavedSearchHandler) GetSavedSearches(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	var searches []models.SavedSearch
 	if err := h.DB.Where("user_id = ?", userID).Order("created_at DESC").Find(&searches).Error; err != nil {
@@ -112,7 +112,7 @@ func (h *SavedSearchHandler) GetSavedSearches(c *fiber.Ctx) error {
 
 // DeleteSavedSearch - Elimina una búsqueda guardada
 func (h *SavedSearchHandler) DeleteSavedSearch(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 	searchID := c.Params("id")
 
 	result := h.DB.Where("id = ? AND user_id = ?", searchID, userID).Delete(&models.SavedSearch{})
@@ -132,7 +132,7 @@ func (h *SavedSearchHandler) DeleteSavedSearch(c *fiber.Ctx) error {
 
 // ToggleSavedSearch - Activa/desactiva las alertas de una búsqueda
 func (h *SavedSearchHandler) ToggleSavedSearch(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 	searchID := c.Params("id")
 
 	var search models.SavedSearch
@@ -153,7 +153,7 @@ func (h *SavedSearchHandler) ToggleSavedSearch(c *fiber.Ctx) error {
 
 // GetSavedSearchMatches - Obtiene las propiedades que actualmente coinciden con la búsqueda guardada
 func (h *SavedSearchHandler) GetSavedSearchMatches(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 	searchID := c.Params("id")
 
 	var search models.SavedSearch
@@ -189,7 +189,7 @@ func (h *SavedSearchHandler) GetSavedSearchMatches(c *fiber.Ctx) error {
 
 // GetNotifications - Obtiene notificaciones del usuario
 func (h *SavedSearchHandler) GetNotifications(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	var notifications []models.Notification
 	err := h.DB.

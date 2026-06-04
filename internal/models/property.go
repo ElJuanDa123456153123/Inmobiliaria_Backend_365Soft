@@ -115,6 +115,7 @@ type Property struct {
 	Destacado       bool           `gorm:"default:false" json:"destacado"`
 	VistasContador  int            `gorm:"default:0" json:"vistas_contador"`
 	FechaPublicacion *time.Time    `json:"fecha_publicacion,omitempty"`
+	FechaExpiracion  *time.Time    `json:"fecha_expiracion,omitempty"` // Fecha en que se eliminará automáticamente la publicación
 
 	// === DATOS PÚBLICOS DEL VENDEDOR (SNAPSHOT) ===
 	// Estos son snapshots de los datos del vendedor al momento de la publicación

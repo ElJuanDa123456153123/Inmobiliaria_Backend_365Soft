@@ -2,12 +2,14 @@ package main
 
 import (
 	"log"
+	"os"
+	"strconv"
 
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/database"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers"
 	adminhandlers "github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers/admin"
-	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/middleware"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/jobs"
+	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/middleware"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/websocket/v2"
@@ -135,6 +137,15 @@ func main() {
 		log.Printf("⚠️  View history handler no disponible: %v", err)
 	}
 
+	// Inicializar handler de pagos QR
+	paymentHandler, err := handlers.NewPaymentHandler()
+	if err != nil {
+		log.Printf("⚠️  Payment handler no disponible: %v", err)
+		// No es fatal, continuar sin payment handler
+	} else {
+		log.Println("✅ Payment handler (Banco MC4 QR) inicializado")
+	}
+
 	// Inicializar handler de WebSocket (para actualizaciones en tiempo real)
 	var wsHandler *handlers.WebSocketHandler
 	if propertyHandler != nil && propertyHandler.Redis != nil {
@@ -225,6 +236,36 @@ func main() {
 		api.Get("/planes/:id", planHandler.GetPlan)
 	}
 
+	// Rutas de Pagos QR (protegidas - requieren autenticación)
+	if paymentHandler != nil {
+		// Crear pago QR (protegido)
+		api.Post("/payments/create", middleware.AuthMiddleware(), paymentHandler.CreatePayment)
+
+		// Verificar estado de pago (protegido)
+		api.Get("/payments/:id/status", middleware.AuthMiddleware(), paymentHandler.GetPaymentStatus)
+
+		// Webhook del banco (PÚBLICO - sin autenticación, el banco llama aquí)
+		api.Post("/payments/webhook", paymentHandler.WebhookPayment)
+
+		// Cancelar pago (protegido)
+		api.Delete("/payments/:id", middleware.AuthMiddleware(), paymentHandler.CancelPayment)
+
+		// Mis pagos (protegido)
+		api.Get("/payments", middleware.AuthMiddleware(), paymentHandler.GetMyPayments)
+
+		// Mi suscripción (protegido)
+		api.Get("/payments/subscription", middleware.AuthMiddleware(), paymentHandler.GetMySubscription)
+
+		// Mis suscripciones (protegido) - Obtener todas las suscripciones
+		api.Get("/payments/subscriptions", middleware.AuthMiddleware(), paymentHandler.GetMySubscriptions)
+
+		// Seleccionar suscripción (protegido)
+		api.Post("/payments/subscriptions/:id/select", middleware.AuthMiddleware(), paymentHandler.SelectSubscription)
+
+		// SIMULAR pago exitoso (SOLO PARA DESARROLLO/PRUEBAS)
+		api.Post("/payments/:id/simulate-success", middleware.AuthMiddleware(), paymentHandler.SimulatePaymentSuccess)
+	}
+
 	// Rutas de gestión de asesores
 	if advisorHandler != nil {
 		admin.Get("/advisors", advisorHandler.GetAdvisors)
@@ -293,7 +334,7 @@ func main() {
 		api.Get("/properties/:id", propertyHandler.GetProperty)            // Ver detalle de propiedad (público)
 
 		// Rutas protegidas restantes
-		api.Post("/properties", middleware.AuthMiddleware(), propertyHandler.CreateProperty)              // Crear propiedad (requiere login)
+		api.Post("/properties", middleware.AuthMiddleware(), middleware.SubscriptionMiddleware(), propertyHandler.CreateProperty)              // Crear propiedad (requiere login + suscripción)
 		api.Delete("/properties/:id", middleware.AuthMiddleware(), propertyHandler.DeleteProperty)        // Eliminar propiedad (requiere login)
 	}
 
@@ -389,6 +430,22 @@ func main() {
 		// Ejecutar verificación cada 1 minuto en desarrollo local para feedback inmediato
 		go savedSearchWorker.StartWorkerScheduler(1)
 		log.Println("🔔 Worker de Búsquedas Guardadas iniciado (Intervalo = 1 minuto)")
+	}
+
+	// ⏰ Scheduler de eliminación de propiedades expiradas
+	cleanupJob, err := jobs.NewCleanupJob()
+	if err != nil {
+		log.Printf("⚠️  Error iniciando job de expiración: %v\n", err)
+	} else {
+		// Verificar cada 1 minuto (ajustable con variable de entorno)
+		checkInterval := 1 // minutos
+		if ci := os.Getenv("EXPIRATION_CHECK_INTERVAL_MINUTES"); ci != "" {
+			if val, err := strconv.Atoi(ci); err == nil && val > 0 {
+				checkInterval = val
+			}
+		}
+		go cleanupJob.StartExpirationScheduler(checkInterval)
+		log.Printf("⏰ Job de expiración de propiedades iniciado: Verificando cada %d minuto(s)\n", checkInterval)
 	}
 
 	log.Fatal(app.Listen(":3001"))

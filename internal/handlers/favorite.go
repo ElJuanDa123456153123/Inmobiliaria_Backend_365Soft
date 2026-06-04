@@ -27,7 +27,7 @@ func NewFavoriteHandler() (*FavoriteHandler, error) {
 
 // AddFavorite - Agrega una propiedad a favoritos
 func (h *FavoriteHandler) AddFavorite(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 	
 	type Request struct {
 		PropertyID uint `json:"property_id"`
@@ -75,7 +75,7 @@ func (h *FavoriteHandler) AddFavorite(c *fiber.Ctx) error {
 
 // RemoveFavorite - Elimina de favoritos
 func (h *FavoriteHandler) RemoveFavorite(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 	propertyID := c.Params("id")
 
 	result := h.DB.Unscoped().Where("user_id = ? AND property_id = ?", userID, propertyID).Delete(&models.Favorite{})
@@ -92,7 +92,7 @@ func (h *FavoriteHandler) RemoveFavorite(c *fiber.Ctx) error {
 
 // GetFavorites - Lista los favoritos del usuario
 func (h *FavoriteHandler) GetFavorites(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	var favorites []models.Favorite
 	if err := h.DB.Preload("Property.PropertyImages").Preload("Property.PropertyAdvisors.Advisor").Where("user_id = ?", userID).Find(&favorites).Error; err != nil {
@@ -104,7 +104,7 @@ func (h *FavoriteHandler) GetFavorites(c *fiber.Ctx) error {
 
 // CheckFavorite - Verifica si una propiedad es favorita
 func (h *FavoriteHandler) CheckFavorite(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 	propertyID := c.Params("propertyId")
 
 	var fav models.Favorite
