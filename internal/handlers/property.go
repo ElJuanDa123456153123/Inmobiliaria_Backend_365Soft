@@ -32,9 +32,12 @@ func NewPropertyHandler() (*PropertyHandler, error) {
 	imageRepo := repository.NewPropertyImageRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
+	advisorRepo := repository.NewAdvisorRepository(db)
+	notificationRepo := repository.NewNotificationRepository(db.DB)
 
-	// Inicializar servicio
-	propertyService := service.NewPropertyService(propertyRepo, imageRepo, userRepo, auditRepo, db.DB)
+	// Inicializar servicios
+	assignmentService := service.NewAssignmentService(advisorRepo, propertyRepo, notificationRepo, db.DB)
+	propertyService := service.NewPropertyService(propertyRepo, imageRepo, userRepo, auditRepo, db.DB, assignmentService)
 
 	// Inicializar Redis (opcional, si falla continúa sin caché)
 	var redis *config.RedisClient

@@ -148,6 +148,44 @@ func (s *QrPagoService) VerificarEstado(ctx context.Context, qrPagoID uint) (*Ve
 		pagoProcesado = true
 	}
 
+	// 5. Crear notificación si el QR expiró o fue rechazado
+	if (estadoActual == "EXPIRADO" || estadoActual == "VENCIDO") && estadoAnterior != "EXPIRADO" && estadoAnterior != "VENCIDO" {
+		// Obtener nombre del plan
+		var plan models.Plan
+		planNombre := "tu plan"
+		if err := s.db.Select("nombre").First(&plan, qrPago.PlanID).Error; err == nil {
+			planNombre = plan.Nombre
+		}
+
+		notification := models.Notification{
+			UserID:      qrPago.UserID,
+			Tipo:        "pago_error",
+			Titulo:      "Pago expirado",
+			Mensaje:     fmt.Sprintf("Tu pago de Bs. %.2f por el plan '%s' ha expirado. Por favor, genera un nuevo QR para completar tu pago.", qrPago.Monto, planNombre),
+			IsRead:      false,
+		}
+		if qrPago.PropertyID != nil && *qrPago.PropertyID > 0 {
+			notification.PropertyID = qrPago.PropertyID
+		}
+		s.db.Create(&notification)
+		fmt.Printf("⏰ [VERIFICAR_ESTADO] Notificación de expiración creada para usuario %d\n", qrPago.UserID)
+	}
+
+	if estadoActual == "RECHAZADO" && estadoAnterior != "RECHAZADO" {
+		notification := models.Notification{
+			UserID:      qrPago.UserID,
+			Tipo:        "pago_error",
+			Titulo:      "Pago rechazado",
+			Mensaje:     fmt.Sprintf("Tu pago de Bs. %.2f ha sido rechazado. Por favor, verifica los datos e intenta nuevamente.", qrPago.Monto),
+			IsRead:      false,
+		}
+		if qrPago.PropertyID != nil && *qrPago.PropertyID > 0 {
+			notification.PropertyID = qrPago.PropertyID
+		}
+		s.db.Create(&notification)
+		fmt.Printf("❌ [VERIFICAR_ESTADO] Notificación de rechazo creada para usuario %d\n", qrPago.UserID)
+	}
+
 	return &VerificarEstadoResponse{
 		Estado:        estadoActual,
 		PagoProcesado: pagoProcesado,
@@ -255,6 +293,7 @@ func (s *QrPagoService) procesarPago(qrPagoID uint) error {
 		}
 
 		// 4. Activar la propiedad (solo si existe property_id)
+		var propertyTitulo string
 		if qrPago.PropertyID != nil && *qrPago.PropertyID > 0 {
 			fmt.Printf("🏠 [PROCESAR_PAGO] Activando propiedad ID: %d\n", *qrPago.PropertyID)
 			if err := tx.Model(&models.Property{}).Where("id = ?", *qrPago.PropertyID).Update("estado_propiedad", "activo").Error; err != nil {
@@ -262,8 +301,45 @@ func (s *QrPagoService) procesarPago(qrPagoID uint) error {
 				return fmt.Errorf("error activando propiedad: %w", err)
 			}
 			fmt.Printf("✅ [PROCESAR_PAGO] Propiedad activada\n")
+
+			// Obtener título de la propiedad para la notificación
+			var property models.Property
+			if err := tx.Select("titulo").First(&property, *qrPago.PropertyID).Error; err == nil {
+				propertyTitulo = property.Titulo
+			}
 		} else {
 			fmt.Printf("⏭️  [PROCESAR_PAGO] No hay propiedad para activar (property_id es nil o 0)\n")
+		}
+
+		// 5. Crear notificación de pago exitoso para el usuario
+		mensaje := fmt.Sprintf("Tu pago de Bs. %.2f por el plan '%s' ha sido confirmado exitosamente.",
+			qrPago.Monto, qrPago.Plan.Nombre)
+		titulo := "¡Pago confirmado!"
+
+		if propertyTitulo != "" {
+			mensaje += fmt.Sprintf(" Tu propiedad '%s' ya está activa.", propertyTitulo)
+		} else {
+			mensaje += " Ya puedes publicar tus propiedades."
+		}
+
+		notification := models.Notification{
+			UserID:      qrPago.UserID,
+			Tipo:        "pago_confirmado",
+			Titulo:      titulo,
+			Mensaje:     mensaje,
+			IsRead:      false,
+		}
+
+		// Asignar PropertyID si existe
+		if qrPago.PropertyID != nil && *qrPago.PropertyID > 0 {
+			notification.PropertyID = qrPago.PropertyID
+		}
+
+		if err := tx.Create(&notification).Error; err != nil {
+			fmt.Printf("⚠️  [PROCESAR_PAGO] Error creando notificación: %v\n", err)
+			// No fallar el proceso si error la notificación
+		} else {
+			fmt.Printf("🔔 [PROCESAR_PAGO] Notificación creada para usuario %d\n", qrPago.UserID)
 		}
 
 		fmt.Printf("✅ [PROCESAR_PAGO] Procesamiento completado exitosamente\n")

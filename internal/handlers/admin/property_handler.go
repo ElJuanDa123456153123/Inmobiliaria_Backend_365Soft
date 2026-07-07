@@ -35,9 +35,12 @@ func NewPropertyHandler() (*PropertyHandler, error) {
 	imageRepo := repository.NewPropertyImageRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
+	advisorRepo := repository.NewAdvisorRepository(db)
+	notificationRepo := repository.NewNotificationRepository(db.DB)
 
-	// Inicializar servicio
-	propertyService := service.NewPropertyService(propertyRepo, imageRepo, userRepo, auditRepo, db.DB)
+	// Inicializar servicios
+	assignmentService := service.NewAssignmentService(advisorRepo, propertyRepo, notificationRepo, db.DB)
+	propertyService := service.NewPropertyService(propertyRepo, imageRepo, userRepo, auditRepo, db.DB, assignmentService)
 
 	// Inicializar Redis (opcional)
 	var redis *config.RedisClient
@@ -80,6 +83,15 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 	search := c.Query("search", "")
 
 	offset := (page - 1) * limit
+
+	// Verificar si es asesor (filtrar solo sus propiedades)
+	advisor, isAdvisor := c.Locals("advisor").(*models.Advisor)
+	if isAdvisor && advisor != nil {
+		// Si es asesor y no se especifica advisor_id, usar su propio ID
+		if advisorID == "" {
+			advisorID = fmt.Sprint(advisor.ID)
+		}
+	}
 
 	// Construir query con preload de relaciones
 	query := db.DB.Model(&models.Property{}).

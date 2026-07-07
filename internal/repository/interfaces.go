@@ -57,3 +57,16 @@ type AuditRepositoryInterface interface {
 	GetByUserID(userID uint, limit int) ([]models.AuditLog, error)
 	GetByAction(action string, limit int) ([]models.AuditLog, error)
 }
+
+// AdvisorRepositoryInterface - Interfaz para repositorio de asesores
+type AdvisorRepositoryInterface interface {
+	GetAllActive() ([]models.Advisor, error)
+	CountActivePropertiesByAdvisorID(advisorID uint) (int64, error)
+	GetByID(id uint) (*models.Advisor, error)
+	GetPropertiesByAdvisorID(advisorID uint, status models.PropertyStatus) ([]models.Property, error)
+}
+
+// NotificationRepositoryInterface - Interfaz para repositorio de notificaciones
+type NotificationRepositoryInterface interface {
+	Create(notification *models.Notification) error
+}

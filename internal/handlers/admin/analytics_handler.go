@@ -23,7 +23,7 @@ func NewAnalyticsHandler() (*AnalyticsHandler, error) {
 	return &AnalyticsHandler{DB: db}, nil
 }
 
-// GetAnalytics - Retorna estadísticas completas
+// GetAnalytics - Retorna estadísticas completas (filtradas por asesor si corresponde)
 func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 	db, err := config.GetDatabase()
 	if err != nil {
@@ -32,44 +32,47 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 		})
 	}
 
+	// Verificar si es asesor
+	advisor, isAdvisor := c.Locals("advisor").(*models.Advisor)
+
 	now := time.Now()
 
-	// 1. Total usuarios registrados (rol = 'usuario')
-	var totalUsers int64
-	if err := db.DB.Model(&models.User{}).Where("rol = ? AND deleted_at IS NULL", models.RoleUsuario).Count(&totalUsers).Error; err != nil {
-		fmt.Printf("❌ Error counting users: %v\n", err)
+	// Base query para propiedades (sin filtro de advisor por defecto)
+	propertiesQuery := db.DB.Model(&models.Property{}).Where("deleted_at IS NULL")
+
+	// Si es asesor, filtrar por advisor_id
+	if isAdvisor && advisor != nil {
+		propertiesQuery = propertiesQuery.Where("advisor_id = ?", advisor.ID)
 	}
 
-	// 2. Total propiedades publicadas
+	// 1. Total propiedades asignadas (para asesores) o registradas (para admin)
 	var totalProperties int64
-	if err := db.DB.Model(&models.Property{}).Where("deleted_at IS NULL").Count(&totalProperties).Error; err != nil {
+	if err := propertiesQuery.Count(&totalProperties).Error; err != nil {
 		fmt.Printf("❌ Error counting properties: %v\n", err)
 	}
 
-	// 3. Propiedades activas vs pendientes
+	// 2. Propiedades activas vs pendientes
 	var activeProperties int64
-	if err := db.DB.Model(&models.Property{}).Where("estado_propiedad = ? AND deleted_at IS NULL", models.PropertyStatusActivo).Count(&activeProperties).Error; err != nil {
+	activeQuery := propertiesQuery.Where("estado_propiedad = ?", models.PropertyStatusActivo)
+	if err := activeQuery.Count(&activeProperties).Error; err != nil {
 		fmt.Printf("❌ Error counting active properties: %v\n", err)
 	}
 
 	var pendingProperties int64
-	if err := db.DB.Model(&models.Property{}).Where("estado_propiedad = ? AND deleted_at IS NULL", models.PropertyStatusPendiente).Count(&pendingProperties).Error; err != nil {
+	pendingQuery := propertiesQuery.Where("estado_propiedad = ?", models.PropertyStatusPendiente)
+	if err := pendingQuery.Count(&pendingProperties).Error; err != nil {
 		fmt.Printf("❌ Error counting pending properties: %v\n", err)
 	}
 
-	// 4. Ingresos del mes (mes actual, pagos completados)
-	var monthlyIncome float64
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-	endOfMonth := startOfMonth.AddDate(0, 1, 0).Add(-time.Nanosecond)
-
-	if err := db.DB.Model(&models.Payment{}).
-		Where("estado = ? AND fecha_pago >= ? AND fecha_pago <= ? AND deleted_at IS NULL", "completado", startOfMonth, endOfMonth).
-		Select("COALESCE(SUM(monto), 0)").
-		Row().Scan(&monthlyIncome); err != nil {
-		fmt.Printf("❌ Error summing monthly income: %v\n", err)
+	// 3. Total de usuarios (solo para admin)
+	var totalUsers int64
+	if !isAdvisor {
+		if err := db.DB.Model(&models.User{}).Where("rol = ?", "usuario").Count(&totalUsers).Error; err != nil {
+			fmt.Printf("❌ Error counting users: %v\n", err)
+		}
 	}
 
-	// 5. Gráfico: Propiedades por día (últimos 30 días)
+	// 4. Gráfico: Propiedades por día (últimos 30 días)
 	type DayCount struct {
 		Date  string `json:"date"`
 		Count int64  `json:"count"`
@@ -90,12 +93,17 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 		DateStr string
 		Count   int64
 	}
-	var dbCounts []dbDayCount
-	if err := db.DB.Model(&models.Property{}).
+	dayQuery := db.DB.Model(&models.Property{}).
 		Select("TO_CHAR(created_at, 'YYYY-MM-DD') as date_str, count(*) as count").
-		Where("created_at >= ? AND deleted_at IS NULL", thirtyDaysAgo).
-		Group("TO_CHAR(created_at, 'YYYY-MM-DD')").
-		Scan(&dbCounts).Error; err != nil {
+		Where("created_at >= ? AND deleted_at IS NULL", thirtyDaysAgo)
+
+	// Si es asesor, filtrar por advisor_id
+	if isAdvisor && advisor != nil {
+		dayQuery = dayQuery.Where("advisor_id = ?", advisor.ID)
+	}
+
+	var dbCounts []dbDayCount
+	if err := dayQuery.Group("TO_CHAR(created_at, 'YYYY-MM-DD')").Scan(&dbCounts).Error; err != nil {
 		fmt.Printf("❌ Error grouping properties by day: %v\n", err)
 	}
 
@@ -113,17 +121,22 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 		})
 	}
 
-	// 6. Gráfico: Propiedades por tipo (casa, departamento, terreno, oficina, local)
+	// 4. Gráfico: Propiedades por tipo
 	type TypeCount struct {
 		Type  string `json:"type"`
 		Count int64  `json:"count"`
 	}
 	var dbTypeCounts []TypeCount
-	if err := db.DB.Model(&models.Property{}).
+	typeQuery := db.DB.Model(&models.Property{}).
 		Select("tipo_propiedad as type, count(*) as count").
-		Where("deleted_at IS NULL").
-		Group("tipo_propiedad").
-		Scan(&dbTypeCounts).Error; err != nil {
+		Where("deleted_at IS NULL")
+
+	// Si es asesor, filtrar por advisor_id
+	if isAdvisor && advisor != nil {
+		typeQuery = typeQuery.Where("advisor_id = ?", advisor.ID)
+	}
+
+	if err := typeQuery.Group("tipo_propiedad").Scan(&dbTypeCounts).Error; err != nil {
 		fmt.Printf("❌ Error grouping properties by type: %v\n", err)
 	}
 
@@ -146,58 +159,64 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 		{Type: "local", Count: typeMap["local"]},
 	}
 
-	// 7. Gráfico: Ingresos por mes (últimos 12 meses)
+	// 5. Tabla: Propiedades más vistas (las 10 con más vistas del asesor)
+	var mostViewedProperties []models.Property
+	mostViewedQuery := db.DB.Model(&models.Property{}).
+		Preload("PropertyImages")
+
+	// Si es asesor, filtrar por advisor_id
+	if isAdvisor && advisor != nil {
+		mostViewedQuery = mostViewedQuery.Where("advisor_id = ?", advisor.ID)
+	}
+
+	if err := mostViewedQuery.Order("vistas_contador DESC").Limit(10).Find(&mostViewedProperties).Error; err != nil {
+		fmt.Printf("❌ Error fetching most viewed properties: %v\n", err)
+	}
+
+	// 6. Ingresos del mes actual
+	var incomeCurrentMonth float64
+	firstDayOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+
+	incomeQuery := db.DB.Model(&models.QrPago{}).
+		Where("estado = ?", "PAGADO").
+		Where("fecha_proceso >= ?", firstDayOfMonth)
+
+	// Si es asesor, filtrar por sus propiedades
+	if isAdvisor && advisor != nil {
+		incomeQuery = incomeQuery.
+			Where("property_id IN (SELECT id FROM properties WHERE advisor_id = ?)", advisor.ID)
+	}
+
+	if err := incomeQuery.Select("COALESCE(SUM(monto), 0)").Scan(&incomeCurrentMonth).Error; err != nil {
+		fmt.Printf("❌ Error calculating income current month: %v\n", err)
+	}
+
+	// 7. Ingresos por mes (últimos 12 meses)
 	type MonthIncome struct {
 		Month  string  `json:"month"`
 		Amount float64 `json:"amount"`
 	}
 
-	monthIncomeMap := make(map[string]float64)
-	var monthList []string
-	for i := 11; i >= 0; i-- {
-		d := time.Date(now.Year(), now.Month()-time.Month(i), 1, 0, 0, 0, 0, now.Location())
-		monthStr := d.Format("2006-01")
-		monthIncomeMap[monthStr] = 0.0
-		monthList = append(monthList, monthStr)
-	}
+	var incomesByMonth []MonthIncome
 
 	twelveMonthsAgo := time.Date(now.Year(), now.Month()-11, 1, 0, 0, 0, 0, now.Location())
 
-	type dbMonthIncome struct {
-		MonthStr string
-		Amount   float64
-	}
-	var dbIncomes []dbMonthIncome
-	if err := db.DB.Model(&models.Payment{}).
-		Select("TO_CHAR(fecha_pago, 'YYYY-MM') as month_str, COALESCE(SUM(monto), 0) as amount").
-		Where("estado = ? AND fecha_pago >= ? AND deleted_at IS NULL", "completado", twelveMonthsAgo).
-		Group("TO_CHAR(fecha_pago, 'YYYY-MM')").
-		Scan(&dbIncomes).Error; err != nil {
-		fmt.Printf("❌ Error grouping payments by month: %v\n", err)
+	incomeByMonthQuery := db.DB.Model(&models.QrPago{}).
+		Select("TO_CHAR(fecha_proceso, 'YYYY-MM') as month, SUM(monto) as amount").
+		Where("estado = ?", "PAGADO").
+		Where("fecha_proceso >= ?", twelveMonthsAgo)
+
+	// Si es asesor, filtrar
+	if isAdvisor && advisor != nil {
+		incomeByMonthQuery = incomeByMonthQuery.
+			Where("property_id IN (SELECT id FROM properties WHERE advisor_id = ?)", advisor.ID)
 	}
 
-	for _, dbi := range dbIncomes {
-		if _, exists := monthIncomeMap[dbi.MonthStr]; exists {
-			monthIncomeMap[dbi.MonthStr] = dbi.Amount
-		}
-	}
-
-	incomeByMonth := make([]MonthIncome, 0, 12)
-	for _, monthStr := range monthList {
-		incomeByMonth = append(incomeByMonth, MonthIncome{
-			Month:  monthStr,
-			Amount: monthIncomeMap[monthStr],
-		})
-	}
-
-	// 8. Tabla: Propiedades más vistas (las 10 con más vistas)
-	var mostViewedProperties []models.Property
-	if err := db.DB.
-		Preload("PropertyImages").
-		Order("vistas_contador DESC").
-		Limit(10).
-		Find(&mostViewedProperties).Error; err != nil {
-		fmt.Printf("❌ Error fetching most viewed properties: %v\n", err)
+	if err := incomeByMonthQuery.
+		Group("TO_CHAR(fecha_proceso, 'YYYY-MM')").
+		Order("month ASC").
+		Scan(&incomesByMonth).Error; err != nil {
+		fmt.Printf("❌ Error calculating income by month: %v\n", err)
 	}
 
 	return c.JSON(fiber.Map{
@@ -205,10 +224,10 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 		"total_properties":       totalProperties,
 		"active_properties":      activeProperties,
 		"pending_properties":     pendingProperties,
-		"income_current_month":   monthlyIncome,
 		"properties_by_day":      propertiesByDay,
 		"properties_by_type":     propertiesByType,
-		"income_by_month":        incomeByMonth,
 		"most_viewed_properties": mostViewedProperties,
+		"income_current_month":   incomeCurrentMonth,
+		"income_by_month":        incomesByMonth,
 	})
 }

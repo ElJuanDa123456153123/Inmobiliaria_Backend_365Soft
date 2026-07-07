@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/database"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers"
 	adminhandlers "github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers/admin"
@@ -21,6 +22,9 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️  No se encontró archivo .env, usando variables de entorno del sistema")
 	}
+
+	// Cargar configuración
+	cfg := config.LoadConfig()
 
 	// Ejecutar migraciones al iniciar
 	if err := database.AutoMigrate(); err != nil {
@@ -104,6 +108,12 @@ func main() {
 		log.Printf("⚠️  Analytics admin handler no disponible: %v", err)
 	}
 
+	// Inicializar handler de reportes financieros
+	reportsHandler, err := adminhandlers.NewReportsHandler()
+	if err != nil {
+		log.Printf("⚠️  Reports handler no disponible: %v", err)
+	}
+
 	// Inicializar handler de planes
 	planHandler, err := handlers.NewPlanHandler()
 	if err != nil {
@@ -146,11 +156,59 @@ func main() {
 		log.Println("✅ Payment handler (Banco MC4 QR) inicializado")
 	}
 
+	// Inicializar handler de comprobantes de pago
+	proofHandler, err := handlers.NewProofHandler()
+	if err != nil {
+		log.Printf("⚠️  Proof handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Proof handler (comprobantes de pago) inicializado")
+	}
+
 	// Inicializar handler de WebSocket (para actualizaciones en tiempo real)
 	var wsHandler *handlers.WebSocketHandler
 	if propertyHandler != nil && propertyHandler.Redis != nil {
 		wsHandler = handlers.NewWebSocketHandler(propertyHandler.Redis)
 		log.Println("✅ WebSocket handler inicializado para actualizaciones en tiempo real")
+	}
+
+	// Inicializar handler de asesores (para dashboard de asesores)
+	advisorDashboardHandler, err := handlers.NewAdvisorHandler()
+	if err != nil {
+		log.Printf("⚠️  Advisor dashboard handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Advisor dashboard handler inicializado")
+	}
+
+	// Inicializar handler de CRM
+	crmHandler, err := handlers.NewCrmHandler()
+	if err != nil {
+		log.Printf("⚠️  CRM handler no disponible: %v", err)
+	} else {
+		log.Println("✅ CRM handler inicializado")
+	}
+
+	// Inicializar handler de Lead Scoring
+	leadScoringHandler, err := handlers.NewLeadScoringHandler()
+	if err != nil {
+		log.Printf("⚠️  Lead Scoring handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Lead Scoring handler inicializado")
+	}
+
+	// Inicializar handler de documentos
+	documentHandler, err := handlers.NewDocumentHandler(cfg)
+	if err != nil {
+		log.Printf("⚠️  Document handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Document handler inicializado")
+	}
+
+	// Inicializar handler de Motor de Recomendaciones
+	recommendationHandler, err := handlers.NewRecommendationHandler()
+	if err != nil {
+		log.Printf("⚠️  Recommendation handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Motor de Recomendaciones inicializado")
 	}
 
 	// Rutas de salud
@@ -167,6 +225,9 @@ func main() {
 			"version": "1.0.0",
 		})
 	})
+
+	// Servir archivos estáticos de uploads (comprobantes de pago, etc.)
+	app.Static("/uploads", "./uploads")
 
 	// API Routes
 	api := app.Group("/api")
@@ -195,42 +256,89 @@ func main() {
 		api.Post("/auth/google/complete-profile", middleware.AuthMiddleware(), googleAuthHandler.CompleteGoogleProfile)
 	}
 
-	// Rutas de administración (protegidas - requieren rol de admin)
-	admin := api.Group("/admin")
-	admin.Use(middleware.AuthMiddleware())      // Primero verificar autenticación
-	admin.Use(middleware.AdminMiddleware())      // Luego verificar rol de admin
+	// Rutas de administración compartidas (admin + asesor)
+	adminShared := api.Group("/admin")
+	adminShared.Use(middleware.AuthMiddleware())
+	adminShared.Use(middleware.AdminOrAdvisorMiddleware()) // Permite admin y asesores
 
-	// Rutas de gestión de usuarios
-	if userHandler != nil {
-		admin.Get("/users", userHandler.GetUsers)
-		admin.Post("/users", userHandler.CreateUser)
-		admin.Put("/users/:id", userHandler.UpdateUser)
-		admin.Patch("/users/:id/toggle-active", userHandler.ToggleUserActive)
-		admin.Delete("/users/:id", userHandler.DeleteUser)
-	}
-
-	// Ruta de Analytics Dashboard
+	// Ruta de Analytics Dashboard (admin y asesores pueden ver)
 	if analyticsHandler != nil {
-		admin.Get("/analytics", analyticsHandler.GetAnalytics)
+		adminShared.Get("/analytics", analyticsHandler.GetAnalytics)
 	}
 
-	// Ruta de migración de datos
+	// Rutas de Reportes Financieros (admin y asesores pueden ver, pero con filtros)
+	if reportsHandler != nil {
+		adminShared.Get("/reports/overview", reportsHandler.GetFinancialOverview)
+		adminShared.Get("/reports/income", reportsHandler.GetIncomeReport)
+		adminShared.Get("/reports/subscriptions", reportsHandler.GetSubscriptionMetrics)
+	}
+
+	// Rutas de administración de propiedades (admin y asesores pueden ver)
+	// IMPORTANTE: El orden de las rutas importa. Las rutas MÁS ESPECÍFICAS deben ir ANTES.
+	if adminPropertyHandler != nil {
+		// Rutas básicas (sin parámetros)
+		adminShared.Get("/properties", adminPropertyHandler.ListProperties)
+		adminShared.Post("/properties", adminPropertyHandler.CreateProperty)
+
+		// Rutas ESPECÍFICAS (van antes que /:id para evitar conflictos)
+		adminShared.Get("/properties/stats", adminPropertyHandler.GetPropertiesStats)
+
+		// Rutas con parámetro :id
+		adminShared.Get("/properties/:id", adminPropertyHandler.GetProperty)
+		adminShared.Put("/properties/:id", adminPropertyHandler.UpdateProperty)
+		adminShared.Delete("/properties/:id", adminPropertyHandler.DeleteProperty)
+
+		// Rutas con :id y sub-rutas (van después)
+		adminShared.Patch("/properties/:id/status", adminPropertyHandler.UpdatePropertyStatus)
+		adminShared.Patch("/properties/:id/featured", adminPropertyHandler.ToggleFeatured)
+		adminShared.Patch("/properties/:id/advisor", adminPropertyHandler.AssignAdvisor)
+	}
+
+	// Rutas de administración exclusivas (SOLO admin)
+	adminExclusive := api.Group("/admin")
+	adminExclusive.Use(middleware.AuthMiddleware())
+	adminExclusive.Use(middleware.AdminMiddleware()) // Solo permite admin
+
+	// Rutas de gestión de usuarios (solo admin)
+	if userHandler != nil {
+		adminExclusive.Get("/users", userHandler.GetUsers)
+		adminExclusive.Post("/users", userHandler.CreateUser)
+		adminExclusive.Put("/users/:id", userHandler.UpdateUser)
+		adminExclusive.Patch("/users/:id/toggle-active", userHandler.ToggleUserActive)
+		adminExclusive.Delete("/users/:id", userHandler.DeleteUser)
+	}
+
+	// Ruta de migración de datos (solo admin)
 	generalAdminHandler, err := handlers.NewAdminHandler()
 	if err != nil {
 		log.Printf("⚠️  Admin handler general no disponible: %v", err)
 	} else {
-		admin.Post("/migrate-data", generalAdminHandler.MigrateData)
+		adminExclusive.Post("/migrate-data", generalAdminHandler.MigrateData)
 	}
 
-	// Gestión de Planes (Planes de suscripción)
+	// Gestión de Planes (solo admin)
 	if planHandler != nil {
-		admin.Get("/planes", planHandler.GetPlans)
-		admin.Post("/planes", planHandler.CreatePlan)
-		admin.Put("/planes/:id", planHandler.UpdatePlan)
-		admin.Delete("/planes/:id", planHandler.DeletePlan)
+		adminExclusive.Get("/planes", planHandler.GetPlans)
+		adminExclusive.Post("/planes", planHandler.CreatePlan)
+		adminExclusive.Put("/planes/:id", planHandler.UpdatePlan)
+		adminExclusive.Delete("/planes/:id", planHandler.DeletePlan)
 	}
 
 	// Rutas Públicas de Planes (solo activos)
+	if planHandler != nil {
+		api.Get("/planes", planHandler.GetActivePlans)
+		api.Get("/planes/:id", planHandler.GetPlan)
+	}
+
+	// Revisión de comprobantes de pago (verificación de admin dentro del handler)
+	// NOTA: Estas rutas están fuera de adminExclusive para usar AuthMiddleware + verificación manual
+	if proofHandler != nil {
+		api.Get("/admin/payments/pending", middleware.AuthMiddleware(), proofHandler.GetPendingProofs)
+		api.Get("/admin/payments/pending/count", middleware.AuthMiddleware(), proofHandler.GetPendingProofsCount)
+		api.Post("/admin/payments/:id/review", middleware.AuthMiddleware(), proofHandler.ReviewProof)
+	}
+
+	// Rutas de Pagos QR (protegidas - requieren autenticación)
 	if planHandler != nil {
 		api.Get("/planes", planHandler.GetActivePlans)
 		api.Get("/planes/:id", planHandler.GetPlan)
@@ -264,45 +372,29 @@ func main() {
 
 		// SIMULAR pago exitoso (SOLO PARA DESARROLLO/PRUEBAS)
 		api.Post("/payments/:id/simulate-success", middleware.AuthMiddleware(), paymentHandler.SimulatePaymentSuccess)
+
+		// Subir comprobante de pago (protegido)
+		if proofHandler != nil {
+			api.Post("/payments/proof", middleware.AuthMiddleware(), proofHandler.UploadProof)
+		}
 	}
 
-	// Rutas de gestión de asesores
+	// Rutas de gestión de asesores (solo admin)
 	if advisorHandler != nil {
-		admin.Get("/advisors", advisorHandler.GetAdvisors)
-		admin.Get("/advisors/:id", advisorHandler.GetAdvisor)
-		admin.Post("/advisors", advisorHandler.CreateAdvisor)
-		admin.Put("/advisors/:id", advisorHandler.UpdateAdvisor)
-		admin.Delete("/advisors/:id", advisorHandler.DeleteAdvisor)
-		admin.Patch("/advisors/:id/toggle-active", advisorHandler.ToggleAdvisorActive)
+		adminExclusive.Get("/advisors", advisorHandler.GetAdvisors)
+		adminExclusive.Get("/advisors/:id", advisorHandler.GetAdvisor)
+		adminExclusive.Post("/advisors", advisorHandler.CreateAdvisor)
+		adminExclusive.Put("/advisors/:id", advisorHandler.UpdateAdvisor)
+		adminExclusive.Delete("/advisors/:id", advisorHandler.DeleteAdvisor)
+		adminExclusive.Patch("/advisors/:id/toggle-active", advisorHandler.ToggleAdvisorActive)
 	}
 
-	// Rutas de administración de propiedades
-	// IMPORTANTE: El orden de las rutas importa. Las rutas MÁS ESPECÍFICAS deben ir ANTES.
-	if adminPropertyHandler != nil {
-		// Rutas básicas (sin parámetros)
-		admin.Get("/properties", adminPropertyHandler.ListProperties)
-		admin.Post("/properties", adminPropertyHandler.CreateProperty)
-
-		// Rutas ESPECÍFICAS (van antes que /:id para evitar conflictos)
-		admin.Get("/properties/stats", adminPropertyHandler.GetPropertiesStats)
-
-		// Rutas con parámetro :id
-		admin.Get("/properties/:id", adminPropertyHandler.GetProperty)
-		admin.Put("/properties/:id", adminPropertyHandler.UpdateProperty)
-		admin.Delete("/properties/:id", adminPropertyHandler.DeleteProperty)
-
-		// Rutas con :id y sub-rutas (van después)
-		admin.Patch("/properties/:id/status", adminPropertyHandler.UpdatePropertyStatus)
-		admin.Patch("/properties/:id/featured", adminPropertyHandler.ToggleFeatured)
-		admin.Patch("/properties/:id/advisor", adminPropertyHandler.AssignAdvisor)
-	}
-
-	// Rutas de asesores asignados a propiedades (van después de las rutas básicas de properties)
+	// Rutas de asesores asignados a propiedades (solo admin)
 	if advisorHandler != nil {
 		// Nuevas rutas para múltiples asesores por propiedad
-		admin.Get("/properties/:id/advisors", advisorHandler.GetPropertyAdvisors)
-		admin.Post("/properties/:id/advisors", advisorHandler.AssignAdvisorToProperty)
-		admin.Delete("/properties/:id/advisors/:advisorId", advisorHandler.RemoveAdvisorFromProperty)
+		adminExclusive.Get("/properties/:id/advisors", advisorHandler.GetPropertyAdvisors)
+		adminExclusive.Post("/properties/:id/advisors", advisorHandler.AssignAdvisorToProperty)
+		adminExclusive.Delete("/properties/:id/advisors/:advisorId", advisorHandler.RemoveAdvisorFromProperty)
 	}
 
 	// Rutas de imágenes (DEBEN IR ANTES que /properties/:id para evitar conflictos)
@@ -346,6 +438,12 @@ func main() {
 		api.Get("/favorites/check/:propertyId", middleware.AuthMiddleware(), favoriteHandler.CheckFavorite)
 	}
 
+	// Rutas de Motor de Recomendaciones (protegidas - requieren autenticación)
+	if recommendationHandler != nil {
+		api.Get("/recommendations", middleware.AuthMiddleware(), recommendationHandler.GetRecommendations)
+		api.Get("/recommendations/user/:userId", middleware.AuthMiddleware(), recommendationHandler.GetRecommendationsById)
+	}
+
 	// Rutas de búsquedas guardadas y notificaciones
 	if savedSearchHandler != nil {
 		api.Post("/saved-searches", middleware.AuthMiddleware(), savedSearchHandler.CreateSavedSearch)
@@ -356,6 +454,17 @@ func main() {
 
 		api.Get("/notifications", middleware.AuthMiddleware(), savedSearchHandler.GetNotifications)
 		api.Patch("/notifications/read", middleware.AuthMiddleware(), savedSearchHandler.MarkNotificationsAsRead)
+		api.Patch("/notifications/:id/read", middleware.AuthMiddleware(), savedSearchHandler.MarkOneNotificationAsRead)
+	}
+
+	// Rutas de documentos
+	if documentHandler != nil {
+		api.Post("/documents", middleware.AuthMiddleware(), documentHandler.UploadDocument)
+		api.Get("/documents", middleware.AuthMiddleware(), documentHandler.GetDocuments)
+		api.Get("/documents/public", documentHandler.GetPublicDocuments)
+		api.Get("/documents/property/:id", documentHandler.GetPropertyDocuments)
+		api.Get("/documents/all", middleware.AuthMiddleware(), middleware.AdminMiddleware(), documentHandler.GetAllDocuments) // Admin only
+		api.Delete("/documents/:id", middleware.AuthMiddleware(), documentHandler.DeleteDocument)
 	}
 
 	// Rutas de historial de vistas
@@ -364,6 +473,60 @@ func main() {
 		api.Get("/view-history", middleware.AuthMiddleware(), viewHistoryHandler.GetViewHistory)
 		api.Delete("/view-history", middleware.AuthMiddleware(), viewHistoryHandler.ClearViewHistory)
 		api.Delete("/view-history/:id", middleware.AuthMiddleware(), viewHistoryHandler.DeleteViewHistoryItem)
+	}
+
+	// Rutas de dashboard de asesores (protegidas - requieren autenticación de asesor)
+	if advisorDashboardHandler != nil {
+		advisor := api.Group("/advisor")
+		advisor.Use(middleware.AuthMiddleware())     // Requiere autenticación
+		advisor.Use(middleware.AdvisorMiddleware()) // Requiere rol de asesor
+
+		// Obtener propiedades del asesor (con filtro opcional de estado)
+		advisor.Get("/properties", advisorDashboardHandler.GetProperties)
+
+		// Activar propiedad (solo el asesor asignado puede hacerlo)
+		advisor.Patch("/properties/:id/activate", advisorDashboardHandler.ActivateProperty)
+
+		// Obtener estadísticas del asesor
+		advisor.Get("/stats", advisorDashboardHandler.GetStats)
+	}
+
+	// Rutas de CRM (protegidas - requieren autenticación de admin o asesor)
+	if crmHandler != nil {
+		crm := api.Group("/crm")
+		crm.Use(middleware.AuthMiddleware())              // Requiere autenticación
+		crm.Use(middleware.AdminOrAdvisorMiddleware())    // Requiere rol de admin o asesor
+
+		// Clientes
+		crm.Post("/clients", crmHandler.CreateClient)                      // Crear cliente
+		crm.Get("/clients", crmHandler.ListClients)                        // Listar clientes
+		crm.Get("/clients/stats", crmHandler.GetFunnelStats)                // Estadísticas embudo
+		crm.Get("/clients/upcoming", crmHandler.GetUpcomingContacts)        // Próximos contactos
+		crm.Get("/clients/:id", crmHandler.GetClient)                       // Ver cliente
+		crm.Put("/clients/:id", crmHandler.UpdateClient)                    // Actualizar cliente
+		crm.Delete("/clients/:id", crmHandler.DeleteClient)                // Eliminar cliente
+
+		// Interacciones
+		crm.Post("/clients/:id/interactions", crmHandler.CreateInteraction)  // Crear interacción
+		crm.Get("/clients/:id/interactions", crmHandler.GetClientInteractions) // Listar interacciones
+	}
+
+	// Rutas de Lead Scoring (protegidas - requieren autenticación de admin o asesor)
+	if leadScoringHandler != nil {
+		crm := api.Group("/crm")
+		crm.Use(middleware.AuthMiddleware())              // Requiere autenticación
+		crm.Use(middleware.AdminOrAdvisorMiddleware())    // Requiere rol de admin o asesor
+
+		// Lead Scoring de clientes
+		crm.Get("/clients/:id/score", leadScoringHandler.GetLeadScore)                    // Obtener score de cliente
+		crm.Post("/clients/:id/score/recalculate", leadScoringHandler.CalculateLeadScore) // Recalcular score
+
+		// Lead Scoring general
+		crm.Get("/leads/scores", leadScoringHandler.GetAllLeadScores)          // Todos los scores
+		crm.Get("/leads/top", leadScoringHandler.GetTopLeads)                  // Top leads
+		crm.Get("/leads/by-level/:level", leadScoringHandler.GetLeadsByLevel)  // Leads por nivel
+		crm.Get("/leads/scores/stats", leadScoringHandler.GetScoreStats)       // Estadísticas de scoring
+		crm.Post("/leads/scores/recalculate-all", leadScoringHandler.RecalculateAllScores) // Recalcular todos
 	}
 
 	// 🚀 WebSocket para actualizaciones en tiempo real
@@ -446,6 +609,16 @@ func main() {
 		}
 		go cleanupJob.StartExpirationScheduler(checkInterval)
 		log.Printf("⏰ Job de expiración de propiedades iniciado: Verificando cada %d minuto(s)\n", checkInterval)
+	}
+
+	// 📊 Scheduler de Lead Scoring (recálculo automático de scores)
+	leadScoringJob, err := jobs.NewLeadScoringJob()
+	if err != nil {
+		log.Printf("⚠️  Error iniciando job de lead scoring: %v\n", err)
+	} else {
+		// Ejecutar cada 24 horas (ajustable con variable de entorno)
+		go leadScoringJob.StartSchedulerFromEnv()
+		log.Println("📊 Job de Lead Scoring iniciado: Recalculando scores cada 24 horas")
 	}
 
 	log.Fatal(app.Listen(":3001"))

@@ -6,7 +6,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Notification - Modelo para notificaciones del sistema sobre búsquedas guardadas
+// Notification - Modelo para notificaciones del sistema
 type Notification struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -17,10 +17,17 @@ type Notification struct {
 	User          User         `gorm:"foreignKey:UserID" json:"-"`
 	SavedSearchID *uint        `gorm:"index" json:"saved_search_id,omitempty"`
 	SavedSearch   *SavedSearch `gorm:"foreignKey:SavedSearchID" json:"saved_search,omitempty"`
-	PropertyID    uint         `gorm:"not null;index" json:"property_id"`
-	Property      Property     `gorm:"foreignKey:PropertyID" json:"property"`
-	Mensaje       string       `gorm:"size:500;not null" json:"mensaje"`
-	IsRead        bool         `gorm:"default:false;not null" json:"is_read"`
+	PropertyID    *uint        `gorm:"index" json:"property_id,omitempty"`
+	Property      Property     `gorm:"foreignKey:PropertyID" json:"property,omitempty"`
+
+	// Campos nuevos para soportar todos los tipos de notificaciones
+	Tipo         string `gorm:"size:50;not null" json:"tipo"` // propiedad_aprobada, pago_confirmado, etc.
+	Titulo       string `gorm:"size:200" json:"titulo"`       // Título opcional de la notificación
+	Mensaje      string `gorm:"size:500;not null" json:"mensaje"`
+	IsRead       bool   `gorm:"default:false;not null" json:"is_read"`
+
+	// Metadata adicional en formato JSON (opcional)
+	Metadata string `gorm:"type:text" json:"metadata,omitempty"`
 }
 
 func (Notification) TableName() string {

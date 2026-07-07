@@ -345,12 +345,12 @@ func (h *AdminHandler) MigrateData(c *fiber.Ctx) error {
 		fmt.Printf("✅ Propiedades actualizadas: %d\n", propsUpdated)
 	}
 
-	// 2. Crear registros en asesores para usuarios con rol "agente" que no tengan uno
-	fmt.Println("🔄 Iniciando migración de asesores para usuarios con rol 'agente'...")
+	// 2. Crear registros en asesores para usuarios con rol "agente" o "inmobiliaria" que no tengan uno
+	fmt.Println("🔄 Iniciando migración de asesores para usuarios con rol 'agente' o 'inmobiliaria'...")
 
-	// Buscar usuarios con rol "agente" sin asesor correspondiente
+	// Buscar usuarios con rol "agente" o "inmobiliaria" sin asesor correspondiente
 	var users []models.User
-	if err := db.DB.Where("rol = ? AND deleted_at IS NULL", models.RoleAgente).Find(&users).Error; err != nil {
+	if err := db.DB.Where("(rol = ? OR rol = ?) AND deleted_at IS NULL", models.RoleAgente, models.RoleInmobiliaria).Find(&users).Error; err != nil {
 		fmt.Printf("❌ Error buscando usuarios: %v\n", err)
 		results["errores"] = append(results["errores"].([]string), fmt.Sprintf("Error buscando usuarios: %v", err))
 		return c.Status(fiber.StatusInternalServerError).JSON(results)

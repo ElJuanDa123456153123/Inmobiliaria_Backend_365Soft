@@ -164,6 +164,24 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		})
 	}
 
+	// Si el rol es agente o inmobiliaria, crear perfil de asesor automáticamente
+	if rol == models.RoleAgente || rol == models.RoleInmobiliaria {
+		advisor := models.Advisor{
+			Nombre:    user.Nombre,
+			Email:     user.Email,
+			Telefono:  user.Telefono,
+			AvatarURL: user.AvatarURL,
+			Activo:    true,
+			UserID:    &user.ID,
+		}
+		if err := h.DB.DB.Create(&advisor).Error; err != nil {
+			// Log error pero continuar (el usuario ya fue creado)
+			fmt.Printf("⚠️  Error creando perfil de asesor para usuario %d: %v\n", user.ID, err)
+		} else {
+			fmt.Printf("✅ Perfil de asesor creado para usuario %d (%s)\n", user.ID, user.Nombre)
+		}
+	}
+
 	// Generar token JWT
 	token, err := h.generateToken(&user)
 	if err != nil {

@@ -15,11 +15,12 @@ import (
 
 // PropertyService - Servicio de lógica de negocio para propiedades
 type PropertyService struct {
-	PropertyRepo repository.PropertyRepositoryInterface
-	ImageRepo    repository.PropertyImageRepositoryInterface
-	UserRepo     repository.UserRepositoryInterface
-	AuditRepo    repository.AuditRepositoryInterface
-	db           *gorm.DB
+	PropertyRepo     repository.PropertyRepositoryInterface
+	ImageRepo        repository.PropertyImageRepositoryInterface
+	UserRepo         repository.UserRepositoryInterface
+	AuditRepo        repository.AuditRepositoryInterface
+	AssignmentService *AssignmentService
+	db               *gorm.DB
 }
 
 // NewPropertyService - Crea un nuevo servicio de propiedades
@@ -29,13 +30,15 @@ func NewPropertyService(
 	userRepo repository.UserRepositoryInterface,
 	auditRepo repository.AuditRepositoryInterface,
 	db *gorm.DB,
+	assignmentService *AssignmentService,
 ) *PropertyService {
 	return &PropertyService{
-		PropertyRepo: propertyRepo,
-		ImageRepo:    imageRepo,
-		UserRepo:     userRepo,
-		AuditRepo:    auditRepo,
-		db:           db,
+		PropertyRepo:     propertyRepo,
+		ImageRepo:        imageRepo,
+		UserRepo:         userRepo,
+		AuditRepo:        auditRepo,
+		db:               db,
+		AssignmentService: assignmentService,
 	}
 }
 
@@ -143,6 +146,19 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 		}
 	}
 
+	// Determinar estado inicial según el rol del usuario
+	// Si es "particular" (rol "usuario"), la propiedad queda en "pendiente" para revisión del asesor
+	// Si es "agente" o "inmobiliaria", va directa a "activo"
+	estadoInicial := models.PropertyStatusActivo
+	var fechaPublicacion *time.Time = &now
+
+	if user.Rol == models.RoleUsuario && req.UserID != 0 {
+		// Particular: propiedad pendiente de revisión por asesor
+		estadoInicial = models.PropertyStatusPendiente
+		fechaPublicacion = nil // No tiene fecha de publicación hasta que el asesor la active
+		fmt.Printf("👤 Usuario particular - Propiedad quedará en estado PENDIENTE para asignación a asesor\n")
+	}
+
 	property := &models.Property{
 		UserID:           req.UserID,
 		Titulo:           req.Titulo,
@@ -178,10 +194,10 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 		VideoURL:         req.VideoURL,
 		Descripcion:      req.Descripcion,
 		TerminosCondiciones: req.TerminosCondiciones,
-		EstadoPropiedad:     models.PropertyStatusActivo,
+		EstadoPropiedad:     estadoInicial,
 		Destacado:           false,
 		VistasContador:      0,
-		FechaPublicacion:    &now,
+		FechaPublicacion:    fechaPublicacion,
 		FechaExpiracion:     fechaExpiracion, // Fecha en que se eliminará automáticamente
 		AdvisorID:           req.AdvisorID,
 	}
@@ -210,6 +226,16 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 	// Guardar propiedad
 	if err := s.PropertyRepo.Create(property); err != nil {
 		return nil, errors.DatabaseError(err)
+	}
+
+	// 🔄 ASIGNACIÓN AUTOMÁTICA DE ASESOR
+	// Si el usuario es "particular" (rol "usuario") y hay un servicio de asignación,
+	// asignar automáticamente un asesor
+	if s.AssignmentService != nil && user.Rol == models.RoleUsuario && req.UserID != 0 {
+		if err := s.AssignmentService.AssignToLeastLoadedAdvisor(property, user.Rol); err != nil {
+			fmt.Printf("⚠️  Error en asignación automática: %v\n", err)
+			// No fallar la creación de propiedad si falla la asignación
+		}
 	}
 
 	// Incrementar contador de propiedades usadas en la suscripción (si no es admin)

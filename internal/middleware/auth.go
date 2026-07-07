@@ -108,6 +108,7 @@ func AuthMiddleware() fiber.Handler {
 		// Inyectar usuario en el contexto
 		c.Locals("user", &user)
 		c.Locals("user_id", user.ID)
+		c.Locals("is_admin", user.Rol == models.RoleAdmin)
 
 		// Continuar al siguiente handler
 		return c.Next()
@@ -130,13 +131,116 @@ func AdminMiddleware() fiber.Handler {
 			})
 		}
 
-		// Verificar rol (admin, agente o inmobiliaria tienen acceso)
-		if user.Rol != models.RoleAdmin && user.Rol != models.RoleAgente && user.Rol != models.RoleInmobiliaria {
+		// Verificar rol (SOLO admin tiene acceso a estas rutas)
+		if user.Rol != models.RoleAdmin {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "Acceso denegado: se requiere rol de administrador, agente o inmobiliaria",
+				"error": "Acceso denegado: se requiere rol de administrador",
 			})
 		}
 
 		return c.Next()
+	}
+}
+
+// AdvisorMiddleware - Middleware para verificar rol de asesor
+func AdvisorMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin verificación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
+		// Obtener usuario del contexto (inyectado por AuthMiddleware)
+		user, ok := c.Locals("user").(*models.User)
+		if !ok || user == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Usuario no autenticado",
+			})
+		}
+
+		// Conectar a la base de datos
+		dbConfig, err := config.NewDatabase()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error conectando a la base de datos",
+			})
+		}
+
+		// Verificar que el usuario tenga un perfil de asesor activo
+		var advisor models.Advisor
+		result := dbConfig.DB.Where("user_id = ? AND activo = ?", user.ID, true).First(&advisor)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"error": "Acceso denegado: no tienes perfil de asesor activo",
+				})
+			}
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error verificando perfil de asesor",
+			})
+		}
+
+		// Inyectar asesor en el contexto
+		c.Locals("advisor", &advisor)
+
+		return c.Next()
+	}
+}
+
+// AdminOrAdvisorMiddleware - Middleware para verificar rol de admin o asesor
+// Permite acceso a admins y asesores, pero inyecta el advisor si es asesor
+func AdminOrAdvisorMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin verificación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
+		// Obtener usuario del contexto (inyectado por AuthMiddleware)
+		user, ok := c.Locals("user").(*models.User)
+		if !ok || user == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Usuario no autenticado",
+			})
+		}
+
+		// Si es admin, permitir acceso completo
+		if user.Rol == models.RoleAdmin {
+			c.Locals("isAdmin", true)
+			return c.Next()
+		}
+
+		// Si es agente o inmobiliaria, verificar que tenga perfil de asesor activo
+		if user.Rol == models.RoleAgente || user.Rol == models.RoleInmobiliaria {
+			dbConfig, err := config.NewDatabase()
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Error conectando a la base de datos",
+				})
+			}
+
+			var advisor models.Advisor
+			result := dbConfig.DB.Where("user_id = ? AND activo = ?", user.ID, true).First(&advisor)
+			if result.Error != nil {
+				if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+					return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+						"error": "Acceso denegado: no tienes perfil de asesor activo",
+					})
+				}
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Error verificando perfil de asesor",
+				})
+			}
+
+			// Inyectar asesor en el contexto para que los handlers puedan filtrar datos
+			c.Locals("advisor", &advisor)
+			c.Locals("isAdvisor", true)
+			return c.Next()
+		}
+
+		// Si no es admin, agente ni inmobiliaria, denegar acceso
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Acceso denegado: se requiere rol de administrador o asesor",
+		})
 	}
 }

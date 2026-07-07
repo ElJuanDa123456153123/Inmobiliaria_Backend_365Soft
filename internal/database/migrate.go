@@ -33,6 +33,10 @@ func AutoMigrate() error {
 		&models.Payment{},          // 💳 Pagos y suscripciones
 		&models.QrPago{},           // 💳 Pagos QR (Banco MC4)
 		&models.Subscription{},     // 📦 Suscripciones de usuarios
+		&models.Client{},            // 👥 CRM - Clientes
+		&models.Interaction{},       // 💬 CRM - Interacciones
+		&models.Document{},         // 📄 Documentos
+		&models.LeadScore{},        // 📊 Lead Scoring
 	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)
@@ -169,8 +173,21 @@ func MigrateExistingData(db *config.Database) error {
 		log.Printf("✅ Total de asesores creados: %d\n", advisorsCreated)
 	}
 
-	if propsUpdated > 0 || agenciaUpdated > 0 || advisorsCreated > 0 {
-		log.Printf("🎉 Migración de datos completada: %d propiedades actualizadas (vendedor), %d propiedades actualizadas (agencia), %d asesores creados\n", propsUpdated, agenciaUpdated, advisorsCreated)
+	// 5. Migrar notificaciones existentes - Agregar tipo por defecto
+	var notifsUpdated int64
+	if err := db.DB.Model(&models.Notification{}).
+		Where("tipo = '' OR tipo IS NULL").
+		Update("tipo", "busqueda_coincidencia").Error; err != nil {
+		log.Printf("❌ Error actualizando tipo de notificaciones: %v\n", err)
+	} else {
+		notifsUpdated = db.DB.RowsAffected
+		if notifsUpdated > 0 {
+			log.Printf("✅ Notificaciones actualizadas (tipo='busqueda_coincidencia'): %d\n", notifsUpdated)
+		}
+	}
+
+	if propsUpdated > 0 || agenciaUpdated > 0 || advisorsCreated > 0 || notifsUpdated > 0 {
+		log.Printf("🎉 Migración de datos completada: %d propiedades (vendedor), %d propiedades (agencia), %d asesores, %d notificaciones\n", propsUpdated, agenciaUpdated, advisorsCreated, notifsUpdated)
 	}
 
 	return nil

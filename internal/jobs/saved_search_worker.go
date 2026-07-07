@@ -86,11 +86,13 @@ func (w *SavedSearchWorker) CheckSavedSearchMatches() error {
 			// Si no existe notificación previa para esta combinación, la creamos
 			if err == gorm.ErrRecordNotFound {
 				mensaje := fmt.Sprintf("¡Nueva coincidencia! La propiedad '%s' en zona '%s' coincide con tu búsqueda guardada '%s'.", prop.Titulo, prop.Zona, search.Nombre)
-				
+
 				notif := models.Notification{
 					UserID:        search.UserID,
 					SavedSearchID: &search.ID,
-					PropertyID:    prop.ID,
+					PropertyID:    &prop.ID,
+					Tipo:          "busqueda_coincidencia",
+					Titulo:        "Nueva Coincidencia",
 					Mensaje:       mensaje,
 					IsRead:        false,
 				}

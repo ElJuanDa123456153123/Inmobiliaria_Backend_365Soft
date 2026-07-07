@@ -187,21 +187,73 @@ func (h *SavedSearchHandler) GetSavedSearchMatches(c *fiber.Ctx) error {
 	})
 }
 
-// GetNotifications - Obtiene notificaciones del usuario
+// GetNotifications - Obtiene notificaciones del usuario con paginación y filtros
 func (h *SavedSearchHandler) GetNotifications(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uint)
 
+	// Obtener parámetros de consulta
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+
+	// Validar límite
+	if limit > 100 {
+		limit = 100
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	// Obtener filtro de leído/no leído
+	var isRead *bool
+	if isReadStr := c.Query("is_read"); isReadStr != "" {
+		if isReadStr == "true" {
+			isReadVal := true
+			isRead = &isReadVal
+		} else if isReadStr == "false" {
+			isReadVal := false
+			isRead = &isReadVal
+		}
+	}
+
 	var notifications []models.Notification
-	err := h.DB.
+	var total int64
+	var totalPages int
+
+	query := h.DB.Model(&models.Notification{}).Where("user_id = ?", userID)
+
+	// Aplicar filtro de leído/no leído si se proporciona
+	if isRead != nil {
+		query = query.Where("is_read = ?", *isRead)
+	}
+
+	// Contar total para paginación
+	if err := query.Count(&total).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error obteniendo notificaciones"})
+	}
+
+	// Calcular offset
+	offset := (page - 1) * limit
+
+	// Obtener notificaciones con paginación y relaciones
+	err := query.
 		Preload("Property.PropertyImages").
 		Preload("SavedSearch").
-		Where("user_id = ?", userID).
 		Order("created_at DESC").
-		Limit(20). // Traer las últimas 20 notificaciones
+		Limit(limit).
+		Offset(offset).
 		Find(&notifications).Error
 
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error obteniendo notificaciones"})
+	}
+
+	// Calcular total de páginas
+	totalPages = int(total) / limit
+	if int(total)%limit != 0 {
+		totalPages++
 	}
 
 	// Obtener cantidad de no leídas
@@ -211,12 +263,16 @@ func (h *SavedSearchHandler) GetNotifications(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"notifications": notifications,
 		"unread_count":  unreadCount,
+		"total":         total,
+		"total_pages":   totalPages,
+		"page":          page,
+		"limit":         limit,
 	})
 }
 
 // MarkNotificationsAsRead - Marca todas las notificaciones del usuario como leídas
 func (h *SavedSearchHandler) MarkNotificationsAsRead(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	userID := c.Locals("user_id").(uint)
 
 	err := h.DB.Model(&models.Notification{}).Where("user_id = ? AND is_read = ?", userID, false).Update("is_read", true).Error
 	if err != nil {
@@ -224,6 +280,46 @@ func (h *SavedSearchHandler) MarkNotificationsAsRead(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "Notificaciones marcadas como leídas"})
+}
+
+// MarkOneNotificationAsRead - Marca una notificación específica como leída
+func (h *SavedSearchHandler) MarkOneNotificationAsRead(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	// Obtener ID de la notificación
+	notificationIDStr := c.Params("id")
+	notificationID, err := strconv.ParseUint(notificationIDStr, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID de notificación inválido"})
+	}
+
+	// Verificar que la notificación pertenezca al usuario
+	var notification models.Notification
+	err = h.DB.Where("id = ? AND user_id = ?", notificationID, userID).First(&notification).Error
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Notificación no encontrada"})
+	}
+
+	// Marcar como leída
+	err = h.DB.Model(&models.Notification{}).Where("id = ? AND user_id = ?", notificationID, userID).Update("is_read", true).Error
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error marcando notificación como leída"})
+	}
+
+	// Obtener notificación actualizada
+	err = h.DB.
+		Preload("Property.PropertyImages").
+		Preload("SavedSearch").
+		Where("id = ?", notificationID).
+		First(&notification).Error
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error obteniendo notificación actualizada"})
+	}
+
+	return c.JSON(fiber.Map{
+		"message":      "Notificación marcada como leída",
+		"notification": notification,
+	})
 }
 
 // BuildMatchQuery - Helper para construir la consulta de propiedades basadas en filtros guardados
