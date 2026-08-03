@@ -205,14 +205,14 @@ func (r *PropertyRepository) IncrementViewCount(propertyID uint) error {
 		UpdateColumn("vistas_contador", gorm.Expr("vistas_contador + 1")).Error
 }
 
-// GetByUserID - Obtiene todas las propiedades de un usuario
+// GetByUserID - Obtiene todas las propiedades de un usuario (solo no eliminadas)
 func (r *PropertyRepository) GetByUserID(userID uint) ([]models.Property, error) {
 	var properties []models.Property
 	err := r.DB.DB.
 		Preload("PropertyImages", func(db *gorm.DB) *gorm.DB {
 			return db.Order("orden ASC")
 		}).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND deleted_at IS NULL", userID).
 		Order("created_at DESC").
 		Find(&properties).Error
 	if err != nil {
@@ -221,11 +221,11 @@ func (r *PropertyRepository) GetByUserID(userID uint) ([]models.Property, error)
 	return properties, nil
 }
 
-// CountByUserID - Cuenta las propiedades de un usuario
+// CountByUserID - Cuenta las propiedades de un usuario (solo no eliminadas)
 func (r *PropertyRepository) CountByUserID(userID uint) (int64, error) {
 	var count int64
 	err := r.DB.DB.Model(&models.Property{}).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND deleted_at IS NULL", userID).
 		Count(&count).Error
 	if err != nil {
 		return 0, err

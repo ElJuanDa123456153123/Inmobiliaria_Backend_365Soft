@@ -542,3 +542,122 @@ func (h *ProofHandler) ReviewProof(c *fiber.Ctx) error {
 		})
 	}
 }
+
+// GetAllProofs - Lista todos los comprobantes con filtros (admin only)
+// GET /api/admin/payments/all?estado={estado}&search={texto}&page={page}&limit={limit}
+func (h *ProofHandler) GetAllProofs(c *fiber.Ctx) error {
+	db, err := config.GetDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	// Verificar que es admin
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil || user.Rol != models.RoleAdmin {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Solo administradores pueden ver comprobantes",
+		})
+	}
+
+	// Obtener parámetros de query
+	estado := c.Query("estado", "")
+	search := c.Query("search", "")
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	// Construir query
+	query := db.DB.Model(&models.QrPago{})
+
+	// Filtro por estado
+	if estado != "" {
+		query = query.Where("estado = ?", estado)
+	}
+
+	// Búsqueda por nombre de usuario, email, o título de propiedad
+	if search != "" {
+		searchTerm := "%" + search + "%"
+		query = query.Joins("LEFT JOIN users ON qr_pagos.user_id = users.id").
+			Where("users.nombre ILIKE ? OR users.email ILIKE ?", searchTerm, searchTerm)
+	}
+
+	// Contar total
+	var total int64
+	query.Count(&total)
+
+	// Paginar
+	offset := (page - 1) * limit
+	var qrPagos []models.QrPago
+
+	if err := query.Preload("Plan").
+		Preload("User").
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&qrPagos).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo comprobantes",
+		})
+	}
+
+	// Convertir a respuesta con información detallada
+	response := make([]GetPendingProofsResponse, 0, len(qrPagos))
+	for _, qr := range qrPagos {
+		proof := GetPendingProofsResponse{
+			ID:             qr.ID,
+			CreatedAt:      qr.CreatedAt.Format("2006-01-02 15:04:05"),
+			Monto:          qr.Monto,
+			Estado:         qr.Estado,
+			ComprobanteURL: qr.DetalleGlosa,
+			User: UserInfo{
+				ID:       qr.User.ID,
+				Nombre:   qr.User.Nombre,
+				Email:    qr.User.Email,
+				Telefono: qr.User.Telefono,
+			},
+		}
+
+		// Info del plan
+		if qr.Plan.ID > 0 {
+			proof.Plan = PlanInfo{
+				ID:     qr.Plan.ID,
+				Nombre: qr.Plan.Nombre,
+				Precio: qr.Plan.Precio,
+			}
+		}
+
+		// Info de la propiedad (si existe)
+		if qr.PropertyID != nil && *qr.PropertyID > 0 {
+			var property models.Property
+			if err := db.DB.Select("id, titulo").First(&property, *qr.PropertyID).Error; err == nil {
+				proof.Property = &PropertyInfo{
+					ID:     property.ID,
+					Titulo: property.Titulo,
+				}
+			}
+		}
+
+		response = append(response, proof)
+	}
+
+	totalPages := int(total) / limit
+	if int(total)%limit > 0 {
+		totalPages++
+	}
+
+	return c.JSON(fiber.Map{
+		"data":        response,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"total_pages": totalPages,
+	})
+}

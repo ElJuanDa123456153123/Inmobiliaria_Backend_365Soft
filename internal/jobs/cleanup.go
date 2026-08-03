@@ -224,3 +224,59 @@ func (j *CleanupJob) StartCleanupScheduler(retentionDays int, intervalHours int)
 		j.CleanupOldPropertyImages(retentionDays)
 	}
 }
+
+// CleanupOldSoftDeletedRecords - Elimina permanentemente registros soft-deleted antiguos
+func (j *CleanupJob) CleanupOldSoftDeletedRecords(retentionMonths int) error {
+	fmt.Printf("🧹 Iniciando limpieza de registros soft-deleted (retención: %d meses)\n", retentionMonths)
+
+	// Calcular la fecha límite
+	cutoffDate := time.Now().AddDate(0, -retentionMonths, 0)
+	fmt.Printf("📅 Fecha límite: %s\n", cutoffDate.Format("2006-01-02"))
+
+	// Contar cuántos registros serán eliminados
+	var count int64
+	err := j.DB.DB.Unscoped().Model(&models.Property{}).
+		Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoffDate).
+		Count(&count).Error
+	if err != nil {
+		fmt.Printf("❌ Error contando registros a eliminar: %v\n", err)
+		return err
+	}
+
+	if count == 0 {
+		fmt.Println("✅ No hay registros soft-deleted antiguos para limpiar")
+		return nil
+	}
+
+	fmt.Printf("📦 Encontrados %d registros para eliminar permanentemente\n", count)
+
+	// Eliminar permanentemente los registros soft-deleted antiguos
+	// Unscoped() permite eliminar registros soft-deleted permanentemente
+	result := j.DB.DB.Unscoped().
+		Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoffDate).
+		Delete(&models.Property{})
+
+	if result.Error != nil {
+		fmt.Printf("❌ Error eliminando registros: %v\n", result.Error)
+		return result.Error
+	}
+
+	fmt.Printf("✅ Limpieza completada. %d registros eliminados permanentemente\n", result.RowsAffected)
+	return nil
+}
+
+// StartSoftDeleteCleanupScheduler - Inicia el scheduler para limpiar soft-deletes periódicamente
+func (j *CleanupJob) StartSoftDeleteCleanupScheduler(retentionMonths int, intervalDays int) {
+	fmt.Printf("⏰ Scheduler de limpieza soft-delete iniciado: Ejecutando cada %d días\n", intervalDays)
+	fmt.Printf("📅 Período de retención: %d meses\n", retentionMonths)
+
+	ticker := time.NewTicker(time.Duration(intervalDays) * 24 * time.Hour)
+	defer ticker.Stop()
+
+	// Ejecutar inmediatamente al inicio
+	j.CleanupOldSoftDeletedRecords(retentionMonths)
+
+	for range ticker.C {
+		j.CleanupOldSoftDeletedRecords(retentionMonths)
+	}
+}

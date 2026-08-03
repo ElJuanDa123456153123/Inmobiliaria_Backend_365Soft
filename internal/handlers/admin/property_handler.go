@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/microcosm-cc/bluemonday"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // PropertyHandler - Handler para administración de propiedades
@@ -58,6 +59,9 @@ func NewPropertyHandler() (*PropertyHandler, error) {
 
 // ListProperties - Lista todas las propiedades con filtros avanzados
 func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
+	// LOG CRÍTICO AL INICIO
+	fmt.Printf("🚨🚨🚨 [LIST PROPS HANDLER] EJECUTÁNDOSE!!! 🚨🚨🚨\n")
+
 	db, err := config.GetDatabase()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -81,6 +85,11 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 	userID := c.Query("user_id", "")
 	advisorID := c.Query("advisor_id", "")
 	search := c.Query("search", "")
+	sinAsesor := c.Query("sin_asesor", "all") // Filtro para propiedades sin asesor asignado: all, true, false
+
+	// Debug: mostrar parámetros recibidos
+	fmt.Printf("🔍 [LIST PROPS] Params: page=%d limit=%d estado='%s' tipo_op='%s' tipo_prop='%s' advisor_id='%s' sin_asesor='%s' search='%s'\n",
+		page, limit, estado, tipoOperacion, tipoPropiedad, advisorID, sinAsesor, search)
 
 	offset := (page - 1) * limit
 
@@ -99,6 +108,8 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 		Preload("PropertyImages").
 		Preload("Advisor").
 		Preload("PropertyAdvisors.Advisor") // Incluir múltiples asesores asignados
+
+	fmt.Printf("📊 [QUERY] Query inicial construido\n")
 
 	// Filtros
 	if estado != "" {
@@ -119,6 +130,19 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 	if advisorID != "" {
 		query = query.Where("advisor_id = ?", advisorID)
 	}
+
+	// Filtro sin_asesor: verificar si tiene asesores asignados en property_advisors (tabla propiedades_asesores)
+	if sinAsesor == "true" {
+		// Propiedades SIN asesores: no tienen registros en propiedades_asesores
+		query = query.Where("NOT EXISTS (SELECT 1 FROM propiedades_asesores WHERE propiedades_asesores.property_id = propiedades.id AND propiedades_asesores.deleted_at IS NULL)")
+		fmt.Printf("🔍 [FILTER] Aplicando filtro: sin_asesor=true (propiedades SIN asesores en propiedades_asesores)\n")
+	}
+	if sinAsesor == "false" {
+		// Propiedades CON asesores: tienen al menos 1 registro en propiedades_asesores
+		query = query.Where("EXISTS (SELECT 1 FROM propiedades_asesores WHERE propiedades_asesores.property_id = propiedades.id AND propiedades_asesores.deleted_at IS NULL)")
+		fmt.Printf("🔍 [FILTER] Aplicando filtro: sin_asesor=false (propiedades CON asesores en propiedades_asesores)\n")
+	}
+
 	if search != "" {
 		searchTerm := "%" + search + "%"
 		query = query.Where("titulo ILIKE ? OR zona ILIKE ? OR vendedor_nombre ILIKE ?",
@@ -127,12 +151,16 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 
 	// Contar total (usando una sesión aislada)
 	var total int64
+	db.DB.Session(&gorm.Session{Logger: logger.Default.LogMode(4)}).Find(&[]models.Property{}).Count(&total)
+	fmt.Printf("📊 [COUNT DIRECTO] Total DIRECTO sin filtros: %d\n", total) // LOG CRÍTICO
+
 	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		fmt.Printf("❌ ERROR contando propiedades: %v\n", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error contando propiedades",
 		})
 	}
+	fmt.Printf("📊 [COUNT QUERY] Total con query: %d\n", total) // LOG CRÍTICO
 
 	// Obtener propiedades
 	var properties []models.Property
@@ -156,6 +184,33 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 		"page":        page,
 		"limit":       limit,
 		"total_pages": totalPages,
+	})
+}
+
+// GetPropertiesWithoutAdvisorCount - Retorna el conteo de propiedades sin asesor
+func (h *PropertyHandler) GetPropertiesWithoutAdvisorCount(c *fiber.Ctx) error {
+	db, err := config.GetDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a base de datos",
+		})
+	}
+
+	var count int64
+	// Usar la tabla propiedades_asesores para contar propiedades sin asesores
+	if err := db.DB.Model(&models.Property{}).
+		Where("estado_propiedad = ?", "activo").
+		Where("NOT EXISTS (SELECT 1 FROM propiedades_asesores WHERE propiedades_asesores.property_id = propiedades.id AND propiedades_asesores.deleted_at IS NULL)").
+		Count(&count).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error contando propiedades sin asesor",
+		})
+	}
+
+	fmt.Printf("📊 [COUNT SIN ASESOR] Propiedades activas sin asesor: %d\n", count)
+
+	return c.JSON(fiber.Map{
+		"count": count,
 	})
 }
 

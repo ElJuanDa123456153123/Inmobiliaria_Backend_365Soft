@@ -313,6 +313,9 @@ type ListPropertiesRequest struct {
 
 // ListProperties - Lista todas las propiedades (con filtros avanzados, ordenamiento y paginación)
 func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
+	// LOG CRÍTICO - Handler PÚBLICO
+	fmt.Printf("🔵🔵🔵 [PUBLIC HANDLER] EJECUTÁNDOSE!!! 🔵🔵🔵 URL: %s\n", c.Path())
+
 	// 🚀 Redis: Verificar caché primero
 	cacheKey := c.Context().QueryArgs().String()
 	if h.Redis != nil {
@@ -550,7 +553,10 @@ func (h *PropertyHandler) GetUserProperties(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(properties)
+	return c.JSON(fiber.Map{
+		"properties": properties,
+		"total":      len(properties),
+	})
 }
 
 // SearchProperties - Búsqueda full-text en propiedades con filtros opcionales

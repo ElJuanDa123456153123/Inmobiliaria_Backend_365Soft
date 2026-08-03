@@ -111,7 +111,7 @@ type Property struct {
 	TerminosCondiciones string `gorm:"type:text" json:"terminos_condiciones,omitempty"`
 
 	// === ESTADO Y PUBLICACIÓN ===
-	EstadoPropiedad PropertyStatus `gorm:"size:20;not null;default:'pendiente'" json:"estado_propiedad"`
+	EstadoPropiedad PropertyStatus `gorm:"size:20;not null;default:'activo'" json:"estado_propiedad"`
 	Destacado       bool           `gorm:"default:false" json:"destacado"`
 	VistasContador  int            `gorm:"default:0" json:"vistas_contador"`
 	FechaPublicacion *time.Time    `json:"fecha_publicacion,omitempty"`

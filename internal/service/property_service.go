@@ -146,18 +146,11 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 		}
 	}
 
-	// Determinar estado inicial según el rol del usuario
-	// Si es "particular" (rol "usuario"), la propiedad queda en "pendiente" para revisión del asesor
-	// Si es "agente" o "inmobiliaria", va directa a "activo"
+	// Estado inicial: SIEMPRE ACTIVO (aprobación automática)
+	// Los usuarios pueden activar/desactivar sus propiedades manualmente
 	estadoInicial := models.PropertyStatusActivo
-	var fechaPublicacion *time.Time = &now
-
-	if user.Rol == models.RoleUsuario && req.UserID != 0 {
-		// Particular: propiedad pendiente de revisión por asesor
-		estadoInicial = models.PropertyStatusPendiente
-		fechaPublicacion = nil // No tiene fecha de publicación hasta que el asesor la active
-		fmt.Printf("👤 Usuario particular - Propiedad quedará en estado PENDIENTE para asignación a asesor\n")
-	}
+	fechaPublicacion := &now
+	fmt.Printf("✅ Propiedad creada con estado ACTIVO (aprobación automática)\n")
 
 	property := &models.Property{
 		UserID:           req.UserID,
@@ -228,15 +221,16 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 		return nil, errors.DatabaseError(err)
 	}
 
-	// 🔄 ASIGNACIÓN AUTOMÁTICA DE ASESOR
-	// Si el usuario es "particular" (rol "usuario") y hay un servicio de asignación,
-	// asignar automáticamente un asesor
-	if s.AssignmentService != nil && user.Rol == models.RoleUsuario && req.UserID != 0 {
-		if err := s.AssignmentService.AssignToLeastLoadedAdvisor(property, user.Rol); err != nil {
-			fmt.Printf("⚠️  Error en asignación automática: %v\n", err)
-			// No fallar la creación de propiedad si falla la asignación
-		}
-	}
+	// 🔄 ASIGNACIÓN DE ASESOR
+	// Las propiedades se publican ACTIVAS automáticamente
+	// El admin/asesor puede asignar un asesor después (similar a comprobantes de pago)
+	// if s.AssignmentService != nil && user.Rol == models.RoleUsuario && req.UserID != 0 {
+	//	if err := s.AssignmentService.AssignToLeastLoadedAdvisor(property, user.Rol); err != nil {
+	//		fmt.Printf("⚠️  Error en asignación automática: %v\n", err)
+	//		// No fallar la creación de propiedad si falla la asignación
+	//	}
+	// }
+	fmt.Printf("✅ Propiedad ACTIVA publicada (sin asignación automática de asesor)\n")
 
 	// Incrementar contador de propiedades usadas en la suscripción (si no es admin)
 	if req.UserID != 0 {

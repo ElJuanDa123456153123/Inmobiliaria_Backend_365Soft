@@ -184,7 +184,7 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 	// Si es asesor, filtrar por sus propiedades
 	if isAdvisor && advisor != nil {
 		incomeQuery = incomeQuery.
-			Where("property_id IN (SELECT id FROM properties WHERE advisor_id = ?)", advisor.ID)
+			Where("property_id IN (SELECT id FROM propiedades WHERE advisor_id = ?)", advisor.ID)
 	}
 
 	if err := incomeQuery.Select("COALESCE(SUM(monto), 0)").Scan(&incomeCurrentMonth).Error; err != nil {
@@ -209,7 +209,7 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 	// Si es asesor, filtrar
 	if isAdvisor && advisor != nil {
 		incomeByMonthQuery = incomeByMonthQuery.
-			Where("property_id IN (SELECT id FROM properties WHERE advisor_id = ?)", advisor.ID)
+			Where("property_id IN (SELECT id FROM propiedades WHERE advisor_id = ?)", advisor.ID)
 	}
 
 	if err := incomeByMonthQuery.

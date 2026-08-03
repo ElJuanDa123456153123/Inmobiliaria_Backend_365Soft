@@ -60,6 +60,7 @@ func (h *AuthHandler) clearRateLimitKeys(clientIP string) {
 // RegistroRequest - Estructura para registro
 type RegistroRequest struct {
 	Nombre             string `json:"nombre"`
+	Apellido           string `json:"apellido"`
 	Email              string `json:"email"`
 	Password           string `json:"password"`
 	Telefono           string `json:"telefono"`
@@ -147,6 +148,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	// Crear usuario
 	user := models.User{
 		Nombre:             req.Nombre,
+		Apellido:           req.Apellido,
 		Email:              req.Email,
 		Password:           string(hashedPassword),
 		Telefono:           req.Telefono,
@@ -297,9 +299,20 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 // GetMe - Obtiene el usuario actual del token
 func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
 	// Obtener usuario del contexto (inyectado por middleware)
-	user := c.Locals("user").(*models.User)
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Usuario no autenticado",
+		})
+	}
 
-	return c.JSON(user)
+	// LOG TEMPORAL PARA DEBUG
+	fmt.Printf("🔍 GetMe - Usuario: ID=%d, Nombre='%s', Apellido='%s', Email='%s'\n",
+		user.ID, user.Nombre, user.Apellido, user.Email)
+
+	return c.JSON(fiber.Map{
+		"user": user,
+	})
 }
 
 // UpdateProfileRequest - Estructura para actualizar perfil

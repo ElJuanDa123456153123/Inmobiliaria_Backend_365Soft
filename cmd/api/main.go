@@ -11,6 +11,8 @@ import (
 	adminhandlers "github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers/admin"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/jobs"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/middleware"
+	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/models"
+	wshandler "github.com/365Soft-Bolivia/inmobiliaria-backend/internal/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/websocket/v2"
@@ -73,6 +75,11 @@ func main() {
 		c.Set("Access-Control-Max-Age", "86400")
 		return c.SendStatus(fiber.StatusNoContent)
 	})
+
+	// 🔌 Inicializar servidor WebSocket
+	if err := wshandler.InitWebSocket(); err != nil {
+		log.Printf("⚠️  WebSocket no disponible: %v", err)
+	}
 
 	// Inicializar handler de autenticación
 	authHandler, err := handlers.NewAuthHandler()
@@ -211,6 +218,51 @@ func main() {
 		log.Println("✅ Motor de Recomendaciones inicializado")
 	}
 
+	// Inicializar handler de Contactos de Propiedades (Panel /panel)
+	var propertyContactHandler *handlers.PropertyContactHandler
+	propertyContactHandler, err = handlers.NewPropertyContactHandler()
+	if err != nil {
+		log.Printf("⚠️  Property Contact handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Property Contact handler inicializado")
+	}
+
+	// Inicializar handler de Mensajes (Panel /panel)
+	var messageHandler *handlers.MessageHandler
+	messageHandler, err = handlers.NewMessageHandler()
+	if err != nil {
+		log.Printf("⚠️  Message handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Message handler inicializado")
+	}
+
+	// Inicializar handler de Visitas (Panel /panel)
+	var visitHandler *handlers.VisitHandler
+	visitHandler, err = handlers.NewVisitHandler()
+	if err != nil {
+		log.Printf("⚠️  Visit handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Visit handler inicializado")
+	}
+
+	// Inicializar handler de Contratos (Panel /mis-contratos)
+	var contractHandler *handlers.ContractHandler
+	contractHandler, err = handlers.NewContractHandler()
+	if err != nil {
+		log.Printf("⚠️  Contract handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Contract handler inicializado")
+	}
+
+	// Inicializar handler de Pagos de Alquiler (Panel /mis-contratos)
+	var rentPaymentHandler *handlers.RentPaymentHandler
+	rentPaymentHandler, err = handlers.NewRentPaymentHandler()
+	if err != nil {
+		log.Printf("⚠️  Rent Payment handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Rent Payment handler inicializado")
+	}
+
 	// Rutas de salud
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -245,6 +297,10 @@ func main() {
 		app.Get("/api/auth/google", googleAuthHandler.GoogleLogin)
 		app.Get("/api/auth/google/callback", googleAuthHandler.GoogleCallback)
 	}
+
+	// 🔌 WebSocket (PÚBLICA - sin autenticación Fiber, la verificación es interna)
+	// ws://localhost:3001/ws?token=xxx
+	app.Get("/ws", wshandler.HandleWebSocket)
 
 	// Rutas protegidas de autenticación (aplicamos middleware individualmente)
 	api.Get("/auth/me", middleware.AuthMiddleware(), authHandler.GetMe)
@@ -282,6 +338,7 @@ func main() {
 
 		// Rutas ESPECÍFICAS (van antes que /:id para evitar conflictos)
 		adminShared.Get("/properties/stats", adminPropertyHandler.GetPropertiesStats)
+		adminShared.Get("/properties/without-advisor-count", adminPropertyHandler.GetPropertiesWithoutAdvisorCount)
 
 		// Rutas con parámetro :id
 		adminShared.Get("/properties/:id", adminPropertyHandler.GetProperty)
@@ -335,6 +392,7 @@ func main() {
 	if proofHandler != nil {
 		api.Get("/admin/payments/pending", middleware.AuthMiddleware(), proofHandler.GetPendingProofs)
 		api.Get("/admin/payments/pending/count", middleware.AuthMiddleware(), proofHandler.GetPendingProofsCount)
+		api.Get("/admin/payments/all", middleware.AuthMiddleware(), proofHandler.GetAllProofs)
 		api.Post("/admin/payments/:id/review", middleware.AuthMiddleware(), proofHandler.ReviewProof)
 	}
 
@@ -511,6 +569,112 @@ func main() {
 		crm.Get("/clients/:id/interactions", crmHandler.GetClientInteractions) // Listar interacciones
 	}
 
+	// Rutas de Panel /panel (requieren propiedad activa)
+	log.Printf("🔍 Verificando handlers del panel: propertyContactHandler=%v, messageHandler=%v, visitHandler=%v",
+		propertyContactHandler != nil, messageHandler != nil, visitHandler != nil)
+	if propertyContactHandler != nil && messageHandler != nil && visitHandler != nil {
+		log.Println("✅ Registrando rutas del panel /panel")
+
+		panel := api.Group("/panel")
+		panel.Use(middleware.AuthMiddleware())
+
+		// Dashboard del panel
+		panel.Get("/dashboard", func(c *fiber.Ctx) error {
+			log.Println("🎯 Ejecutando handler /api/panel/dashboard")
+			userID := c.Locals("user_id").(uint)
+
+			// Obtener estadísticas básicas
+			var contactCount int64
+			var visitCount int64
+			var messageCount int64
+			var activeCount int64
+
+			dbConfig, _ := config.GetDatabase()
+
+			// Contar propiedades activas
+			dbConfig.DB.Model(&models.Property{}).
+				Where("user_id = ? AND estado_propiedad = ?", userID, models.PropertyStatusActivo).
+				Count(&activeCount)
+
+			// Contactos no leídos
+			dbConfig.DB.Model(&models.PropertyContact{}).
+				Where("vendedor_id = ? AND leido = ?", userID, false).
+				Count(&contactCount)
+
+			// Visitas pendientes
+			dbConfig.DB.Model(&models.Visit{}).
+				Joins("JOIN propiedades ON visits.property_id = propiedades.id").
+				Where("propiedades.user_id = ? AND visits.estado = ?", userID, models.VisitStatusPendiente).
+				Count(&visitCount)
+
+			// Mensajes no leídos
+			dbConfig.DB.Model(&models.Message{}).
+				Where("para_user_id = ? AND leido = ?", userID, false).
+				Count(&messageCount)
+
+			return c.JSON(fiber.Map{
+				"propiedades_activas": activeCount,
+				"contactos_no_leidos":  contactCount,
+				"visitas_pendientes":   visitCount,
+				"mensajes_no_leidos":   messageCount,
+			})
+		})
+
+		// Contactos de propiedades
+		panel.Get("/contacts", propertyContactHandler.GetMyContacts)
+		panel.Get("/properties/:id/contacts", propertyContactHandler.GetPropertyContacts)
+		panel.Post("/properties/:id/contacts", propertyContactHandler.CreateContact)
+		panel.Patch("/contacts/:id/read", propertyContactHandler.MarkAsRead)
+		panel.Patch("/contacts/:id/respond", propertyContactHandler.MarkAsResponded)
+
+		// Mensajería
+		panel.Get("/messages/conversations", messageHandler.GetConversations)
+		panel.Get("/messages/thread/:user_id", messageHandler.GetConversation)
+		panel.Post("/messages/send", messageHandler.SendMessage)
+		panel.Post("/messages/mark-read/:user_id", messageHandler.MarkMessagesAsRead)
+		panel.Delete("/messages/conversation/:user_id", messageHandler.DeleteConversation)
+		panel.Post("/messages/upload", messageHandler.UploadMessageFile)
+
+		// Servir archivos de mensajes (público)
+		api.Get("/mensajes/files/:filename", messageHandler.ServeMessageFile)
+
+		// Visitas
+		panel.Get("/visits/my", visitHandler.GetMyVisits)
+		panel.Get("/visits/received", visitHandler.GetReceivedVisits)
+		panel.Get("/properties/:id/visits", visitHandler.GetPropertyVisits)
+		panel.Post("/visits", visitHandler.ScheduleVisit)
+		panel.Patch("/visits/:id", visitHandler.UpdateVisitStatus)
+		panel.Patch("/visits/:id/confirm", visitHandler.ConfirmVisit)
+	}
+
+	// Rutas de Panel /mis-contratos (requieren contrato)
+	if contractHandler != nil && rentPaymentHandler != nil {
+		contracts := api.Group("/contracts")
+		contracts.Use(middleware.AuthMiddleware())                   // Requiere autenticación
+		contracts.Use(middleware.ContractOwnerMiddleware())         // Requiere al menos 1 contrato
+
+		// Contratos
+		contracts.Post("/", contractHandler.CreateContract)                  // Crear contrato
+		contracts.Get("/my", contractHandler.GetMyContracts)                 // Mis contratos
+		contracts.Get("/:id", contractHandler.GetContract)                   // Ver contrato
+		contracts.Patch("/:id", contractHandler.UpdateContract)              // Actualizar contrato
+		contracts.Get("/:id/pdf", contractHandler.GeneratePDF)               // Generar PDF
+
+		// Pagos de alquiler
+		contracts.Post("/:id/payments", rentPaymentHandler.RegisterPayment)   // Registrar pago
+		contracts.Get("/:id/payments", rentPaymentHandler.GetContractPayments) // Pagos de un contrato
+	}
+
+	// Rutas de pagos de alquiler (acceso independiente por contrato)
+	if rentPaymentHandler != nil {
+		rentPayments := api.Group("/rent-payments")
+		rentPayments.Use(middleware.AuthMiddleware())                   // Requiere autenticación
+		rentPayments.Use(middleware.ContractOwnerMiddleware())         // Requiere al menos 1 contrato
+
+		rentPayments.Patch("/:id", rentPaymentHandler.UpdatePaymentStatus)       // Actualizar estado de pago
+		rentPayments.Get("/history", rentPaymentHandler.GetPaymentHistory)      // Historial de pagos
+	}
+
 	// Rutas de Lead Scoring (protegidas - requieren autenticación de admin o asesor)
 	if leadScoringHandler != nil {
 		crm := api.Group("/crm")
@@ -609,6 +773,30 @@ func main() {
 		}
 		go cleanupJob.StartExpirationScheduler(checkInterval)
 		log.Printf("⏰ Job de expiración de propiedades iniciado: Verificando cada %d minuto(s)\n", checkInterval)
+	}
+
+	// 🧹 Scheduler de limpieza permanente de registros soft-deleted
+	softDeleteCleanup, err := jobs.NewCleanupJob()
+	if err != nil {
+		log.Printf("⚠️  Error iniciando job de limpieza soft-delete: %v\n", err)
+	} else {
+		// Ejecutar cada 7 días (ajustable con variable de entorno)
+		retentionMonths := 6 // meses
+		if rm := os.Getenv("SOFT_DELETE_RETENTION_MONTHS"); rm != "" {
+			if val, err := strconv.Atoi(rm); err == nil && val > 0 {
+				retentionMonths = val
+			}
+		}
+
+		cleanupIntervalDays := 7 // días
+		if ci := os.Getenv("SOFT_DELETE_CLEANUP_INTERVAL_DAYS"); ci != "" {
+			if val, err := strconv.Atoi(ci); err == nil && val > 0 {
+				cleanupIntervalDays = val
+			}
+		}
+
+		go softDeleteCleanup.StartSoftDeleteCleanupScheduler(retentionMonths, cleanupIntervalDays)
+		log.Printf("🧹 Job de limpieza soft-delete iniciado: Retención=%d meses, Intervalo=%d días\n", retentionMonths, cleanupIntervalDays)
 	}
 
 	// 📊 Scheduler de Lead Scoring (recálculo automático de scores)

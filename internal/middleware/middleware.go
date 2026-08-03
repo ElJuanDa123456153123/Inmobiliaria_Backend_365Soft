@@ -170,11 +170,26 @@ func ErrorHandlerMiddleware() fiber.Handler {
 // NotFoundMiddleware - Maneja rutas no encontradas
 func NotFoundMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"error":    "Ruta no encontrada",
-			"path":     c.Path(),
-			"method":   c.Method(),
-		})
+		// Continuar al siguiente middleware/ruta
+		err := c.Next()
+
+		// Si el status code ya fue seteado (no es 404 por defecto), una ruta manejó la petición
+		// Fiber setea status code 200 por default cuando una ruta maneja la petición
+		if c.Response().StatusCode() != 404 {
+			return err
+		}
+
+		// Si llegamos aquí con status 404, ninguna ruta coincidió
+		// Solo retornar JSON 404 si no hay otro error
+		if err == nil {
+			return c.Status(404).JSON(fiber.Map{
+				"success": false,
+				"error":    "Ruta no encontrada",
+				"path":     c.Path(),
+				"method":   c.Method(),
+			})
+		}
+
+		return err
 	}
 }

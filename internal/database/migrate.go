@@ -37,6 +37,12 @@ func AutoMigrate() error {
 		&models.Interaction{},       // 💬 CRM - Interacciones
 		&models.Document{},         // 📄 Documentos
 		&models.LeadScore{},        // 📊 Lead Scoring
+		// 📦 Panel /panel y /mis-contratos
+		&models.PropertyContact{},  // 👥 Contactos de propiedades
+		&models.Message{},          // 💬 Mensajería entre usuarios
+		&models.Visit{},            // 📅 Visitas agendadas
+		&models.RentalContract{},   // 📜 Contratos de alquiler
+		&models.RentPayment{},      // 💰 Pagos de alquiler
 	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)

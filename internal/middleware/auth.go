@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -43,6 +44,8 @@ func AuthMiddleware() fiber.Handler {
 		})
 
 		if err != nil || !token.Valid {
+			// LOG TEMPORAL PARA DEBUG
+			fmt.Printf("❌ Token rechazado - Error: %v, Token válido: %v\n", err, token.Valid)
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Token inválido",
 			})
@@ -77,8 +80,8 @@ func AuthMiddleware() fiber.Handler {
 				Verificado: true,
 			}
 		} else {
-			// Buscar usuario en la base de datos
-			dbConfig, err := config.NewDatabase()
+			// Buscar usuario en la base de datos usando conexión singleton
+			dbConfig, err := config.GetDatabase()
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"error": "Error conectando a la base de datos",
@@ -158,8 +161,8 @@ func AdvisorMiddleware() fiber.Handler {
 			})
 		}
 
-		// Conectar a la base de datos
-		dbConfig, err := config.NewDatabase()
+		// Conectar a la base de datos usando conexión singleton
+		dbConfig, err := config.GetDatabase()
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Error conectando a la base de datos",
@@ -212,7 +215,7 @@ func AdminOrAdvisorMiddleware() fiber.Handler {
 
 		// Si es agente o inmobiliaria, verificar que tenga perfil de asesor activo
 		if user.Rol == models.RoleAgente || user.Rol == models.RoleInmobiliaria {
-			dbConfig, err := config.NewDatabase()
+			dbConfig, err := config.GetDatabase()
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"error": "Error conectando a la base de datos",
@@ -242,5 +245,108 @@ func AdminOrAdvisorMiddleware() fiber.Handler {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": "Acceso denegado: se requiere rol de administrador o asesor",
 		})
+	}
+}
+
+// PropertyOwnerMiddleware - Middleware para verificar que el usuario tiene al menos 1 propiedad ACTIVA
+// Requiere: Usuario autenticado (debe ejecutarse después de AuthMiddleware)
+// Usado en: /panel/*
+func PropertyOwnerMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin verificación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
+		// Obtener usuario del contexto (inyectado por AuthMiddleware)
+		user, ok := c.Locals("user").(*models.User)
+		if !ok || user == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Usuario no autenticado",
+			})
+		}
+
+		// Conectar a la base de datos usando conexión singleton
+		dbConfig, err := config.GetDatabase()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error conectando a la base de datos",
+			})
+		}
+
+		// Contar propiedades activas del usuario
+		var count int64
+		if err := dbConfig.DB.Model(&models.Property{}).
+			Where("user_id = ? AND estado_propiedad = ? AND deleted_at IS NULL", user.ID, models.PropertyStatusActivo).
+			Count(&count).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error verificando propiedades activas",
+			})
+		}
+
+		// Si no tiene propiedades activas, denegar acceso
+		if count == 0 {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error":       "Acceso denegado: necesitas al menos 1 propiedad activa para acceder al panel",
+				"message":     "Debes publicar una propiedad para acceder a esta sección",
+				"redirect_to": "/publicar",
+			})
+		}
+
+		// Inyectar cantidad de propiedades activas en el contexto
+		c.Locals("active_properties_count", count)
+
+		return c.Next()
+	}
+}
+
+// ContractOwnerMiddleware - Middleware para verificar que el usuario tiene al menos 1 contrato (activo o histórico)
+// Requiere: Usuario autenticado (debe ejecutarse después de AuthMiddleware)
+// Usado en: /mis-contratos/*
+func ContractOwnerMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Permitir preflight CORS OPTIONS requests sin verificación
+		if c.Method() == "OPTIONS" {
+			return c.Next()
+		}
+
+		// Obtener usuario del contexto (inyectado por AuthMiddleware)
+		user, ok := c.Locals("user").(*models.User)
+		if !ok || user == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Usuario no autenticado",
+			})
+		}
+
+		// Conectar a la base de datos usando conexión singleton
+		dbConfig, err := config.GetDatabase()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error conectando a la base de datos",
+			})
+		}
+
+		// Contar contratos del usuario (como vendedor o inquilino)
+		var count int64
+		if err := dbConfig.DB.Model(&models.RentalContract{}).
+			Where("(vendedor_id = ? OR inquilino_id = ?) AND deleted_at IS NULL", user.ID, user.ID).
+			Count(&count).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error verificando contratos",
+			})
+		}
+
+		// Si no tiene contratos, denegar acceso
+		if count == 0 {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error":   "Acceso denegado: necesitas al menos 1 contrato para acceder a esta sección",
+				"message": "No tienes contratos registrados",
+			})
+		}
+
+		// Inyectar cantidad de contratos en el contexto
+		c.Locals("contracts_count", count)
+
+		return c.Next()
 	}
 }
