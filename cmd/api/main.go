@@ -35,7 +35,8 @@ func main() {
 
 	// Crear app de Fiber
 	app := fiber.New(fiber.Config{
-		AppName: "Inmobiliaria API v1.0",
+		AppName:      "Inmobiliaria API v1.0",
+		ReadBufferSize: 16384, // 16KB para evitar error 431 con cookies grandes
 	})
 
 	// 🔒 Middleware profesional
@@ -261,6 +262,15 @@ func main() {
 		log.Printf("⚠️  Rent Payment handler no disponible: %v", err)
 	} else {
 		log.Println("✅ Rent Payment handler inicializado")
+	}
+
+	// Inicializar handler de Solicitudes de Alquiler
+	var rentalRequestHandler *handlers.RentalRequestHandler
+	rentalRequestHandler, err = handlers.NewRentalRequestHandler()
+	if err != nil {
+		log.Printf("⚠️  Rental Request handler no disponible: %v", err)
+	} else {
+		log.Println("✅ Rental Request handler inicializado")
 	}
 
 	// Rutas de salud
@@ -645,13 +655,23 @@ func main() {
 		panel.Post("/visits", visitHandler.ScheduleVisit)
 		panel.Patch("/visits/:id", visitHandler.UpdateVisitStatus)
 		panel.Patch("/visits/:id/confirm", visitHandler.ConfirmVisit)
+
+		// Solicitudes de alquiler (propietario) e inquilinos
+		if rentalRequestHandler != nil {
+			panel.Get("/rental-requests", rentalRequestHandler.GetRentalRequests)
+		}
+		if rentPaymentHandler != nil {
+			panel.Get("/tenants", rentPaymentHandler.GetPanelTenants)
+		}
 	}
 
-	// Rutas de Panel /mis-contratos (requieren contrato)
+	// Rutas de contratos de alquiler
+	// Nota: NO se aplica ContractOwnerMiddleware a nivel de grupo porque impedía
+	// crear el primer contrato y ver la lista vacía (GET /my). Los handlers
+	// individuales ya validan la pertenencia de cada recurso (vendedor/inquilino).
 	if contractHandler != nil && rentPaymentHandler != nil {
 		contracts := api.Group("/contracts")
-		contracts.Use(middleware.AuthMiddleware())                   // Requiere autenticación
-		contracts.Use(middleware.ContractOwnerMiddleware())         // Requiere al menos 1 contrato
+		contracts.Use(middleware.AuthMiddleware()) // Requiere autenticación
 
 		// Contratos
 		contracts.Post("/", contractHandler.CreateContract)                  // Crear contrato
@@ -659,20 +679,35 @@ func main() {
 		contracts.Get("/:id", contractHandler.GetContract)                   // Ver contrato
 		contracts.Patch("/:id", contractHandler.UpdateContract)              // Actualizar contrato
 		contracts.Get("/:id/pdf", contractHandler.GeneratePDF)               // Generar PDF
+		contracts.Post("/:id/terminate", contractHandler.TerminateContract)  // Terminar contrato + registrar devolución
 
 		// Pagos de alquiler
 		contracts.Post("/:id/payments", rentPaymentHandler.RegisterPayment)   // Registrar pago
 		contracts.Get("/:id/payments", rentPaymentHandler.GetContractPayments) // Pagos de un contrato
 	}
 
-	// Rutas de pagos de alquiler (acceso independiente por contrato)
+	// Rutas de pagos de alquiler (historial y actualización de estado)
 	if rentPaymentHandler != nil {
 		rentPayments := api.Group("/rent-payments")
-		rentPayments.Use(middleware.AuthMiddleware())                   // Requiere autenticación
-		rentPayments.Use(middleware.ContractOwnerMiddleware())         // Requiere al menos 1 contrato
+		rentPayments.Use(middleware.AuthMiddleware()) // Requiere autenticación
 
 		rentPayments.Patch("/:id", rentPaymentHandler.UpdatePaymentStatus)       // Actualizar estado de pago
 		rentPayments.Get("/history", rentPaymentHandler.GetPaymentHistory)      // Historial de pagos
+		rentPayments.Post("/:id/comprobante", rentPaymentHandler.SubmitComprobante) // Inquilino sube comprobante de cuota
+		rentPayments.Post("/:id/confirm-receipt", rentPaymentHandler.ConfirmReceipt) // Inquilino confirma recepción de devolución
+	}
+
+	// Rutas de solicitudes de alquiler
+	if rentalRequestHandler != nil {
+		// El interesado solicita alquilar una propiedad
+		api.Post("/properties/:id/rental-request", middleware.AuthMiddleware(), rentalRequestHandler.CreateRentalRequest)
+
+		rentalRequests := api.Group("/rental-requests")
+		rentalRequests.Use(middleware.AuthMiddleware())
+
+		rentalRequests.Get("/my", rentalRequestHandler.GetMyRentalRequests)    // Solicitudes enviadas
+		rentalRequests.Patch("/:id/accept", rentalRequestHandler.AcceptRentalRequest) // Propietario acepta → crea contrato + cuotas
+		rentalRequests.Patch("/:id/reject", rentalRequestHandler.RejectRentalRequest) // Propietario rechaza
 	}
 
 	// Rutas de Lead Scoring (protegidas - requieren autenticación de admin o asesor)
@@ -807,6 +842,24 @@ func main() {
 		// Ejecutar cada 24 horas (ajustable con variable de entorno)
 		go leadScoringJob.StartSchedulerFromEnv()
 		log.Println("📊 Job de Lead Scoring iniciado: Recalculando scores cada 24 horas")
+	}
+
+	// 🏠 Scheduler del módulo de alquiler (cuotas atrasadas, contratos vencidos)
+	rentJob, err := jobs.NewRentJob()
+	if err != nil {
+		log.Printf("⚠️  Error iniciando job de alquiler: %v\n", err)
+	} else {
+		go rentJob.StartRentScheduler(24) // Cada 24 horas
+		log.Println("🏠 Job de Alquiler iniciado: cuotas atrasadas y contratos vencidos cada 24 horas")
+	}
+
+	// 🤝 Scheduler semanal de recomendaciones (RF-260: precalculo + caché de usuarios activos)
+	recommendationJob, err := jobs.NewRecommendationJob()
+	if err != nil {
+		log.Printf("⚠️  Error iniciando job de recomendaciones: %v\n", err)
+	} else {
+		go recommendationJob.StartSchedulerFromEnv() // RECOMMENDATION_INTERVAL_HOURS, default 168 (semanal)
+		log.Println("🤝 Job de Recomendaciones iniciado: precalculando recomendaciones cada semana")
 	}
 
 	log.Fatal(app.Listen(":3001"))

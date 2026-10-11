@@ -12,6 +12,7 @@ import (
 // RecommendationHandler - Handler para Motor de Recomendaciones
 type RecommendationHandler struct {
 	RecommendationService *services.RecommendationService
+	Redis                 *config.RedisClient
 }
 
 // NewRecommendationHandler - Crea un nuevo handler de recomendaciones
@@ -34,13 +35,22 @@ func NewRecommendationHandler() (*RecommendationHandler, error) {
 		savedSearchRepo,
 	)
 
+	// Redis opcional (caché de recomendaciones precalculadas por el job semanal)
+	redisClient, err := config.NewRedis()
+	if err != nil {
+		redisClient = nil
+	}
+
 	return &RecommendationHandler{
 		RecommendationService: recommendationService,
+		Redis:                 redisClient,
 	}, nil
 }
 
 // GetRecommendations - Obtiene recomendaciones personalizadas para el usuario
 // GET /api/recommendations
+// Prioriza las recomendaciones precalculadas por el job semanal (caché Redis, 7 días);
+// si no hay caché, calcula en línea (contenido + colaborativo).
 func (h *RecommendationHandler) GetRecommendations(c *fiber.Ctx) error {
 	// Obtener user_id del JWT
 	userID := c.Locals("user_id")
@@ -68,12 +78,33 @@ func (h *RecommendationHandler) GetRecommendations(c *fiber.Ctx) error {
 		limit = 10
 	}
 
-	// Obtener recomendaciones
-	recommendations, err := h.RecommendationService.GetContentBasedRecommendations(userIDUint, limit)
+	// 1. Intentar caché precalculada
+	if h.Redis != nil {
+		var cached []services.PropertyRecommendation
+		if err := h.Redis.GetCachedRecommendations(userIDUint, &cached); err == nil && len(cached) > 0 {
+			if limit < len(cached) {
+				cached = cached[:limit]
+			}
+			return c.JSON(fiber.Map{
+				"recommendations": cached,
+				"total":           len(cached),
+				"user_id":         userIDUint,
+				"cached":          true,
+			})
+		}
+	}
+
+	// 2. Cálculo en línea
+	recommendations, err := h.RecommendationService.GetRecommendations(userIDUint, limit)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
+	}
+
+	// 3. Almacenar en caché para las próximas consultas
+	if h.Redis != nil && len(recommendations) > 0 {
+		h.Redis.CacheRecommendations(userIDUint, recommendations)
 	}
 
 	return c.JSON(fiber.Map{

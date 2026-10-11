@@ -662,6 +662,12 @@ func (h *PropertyHandler) ToggleFeatured(c *fiber.Ctx) error {
 		})
 	}
 
+	// Invalidar caché (detalle de la propiedad y listados públicos)
+	if h.Redis != nil {
+		h.Redis.InvalidateProperty(property.ID)
+		h.Redis.InvalidatePropertyLists()
+	}
+
 	h.LogAudit(c, "admin_toggle_featured", "property", &property.ID, &user.ID, map[string]interface{}{
 		"destacado": req.Destacado,
 	})

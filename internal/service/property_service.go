@@ -491,11 +491,12 @@ func (s *PropertyService) validateCreateRequest(req *CreatePropertyRequest) erro
 
 	// Validar tipo de operación
 	validOps := map[string]bool{
-		"venta":    true,
-		"alquiler": true,
+		"venta":       true,
+		"alquiler":    true,
+		"anticretico": true,
 	}
 	if !validOps[req.TipoOperacion] {
-		return errors.ValidationError("tipo_operacion", "Tipo de operación inválido. Debe ser: venta o alquiler")
+		return errors.ValidationError("tipo_operacion", "Tipo de operación inválido. Debe ser: venta, alquiler o anticretico")
 	}
 
 	// Validar moneda
@@ -504,52 +505,13 @@ func (s *PropertyService) validateCreateRequest(req *CreatePropertyRequest) erro
 	}
 
 	// Validar precio según moneda Y tipo de operación
-	if req.Moneda == "USD" {
-		if req.TipoOperacion == "alquiler" {
-			// Alquiler en USD (precios mensuales): $50 - $50,000
-			if req.Precio < 50 || req.Precio > 50000 {
-				return errors.ValidationError("precio", "El precio de alquiler en USD debe estar entre $50 y $50,000 mensuales")
-			}
-		} else if req.TipoOperacion == "anticretico" {
-			// Anticrético en USD: $1,000 - $1,000,000
-			if req.Precio < 1000 || req.Precio > 1000000 {
-				return errors.ValidationError("precio", "El monto de anticrético en USD debe estar entre $1,000 y $1,000,000")
-			}
-		} else {
-			// Venta en USD: $100 - $100,000,000
-			if req.Precio < 100 || req.Precio > 100000000 {
-				return errors.ValidationError("precio", "El precio en USD debe estar entre $100 y $100,000,000")
-			}
-		}
-	} else if req.Moneda == "BOB" {
-		if req.TipoOperacion == "alquiler" {
-			// Alquiler en BOB (precios mensuales): 200 - 200,000 Bs
-			if req.Precio < 200 || req.Precio > 200000 {
-				return errors.ValidationError("precio", "El precio de alquiler en BOB debe estar entre 200 y 200,000 Bs mensuales")
-			}
-		} else if req.TipoOperacion == "anticretico" {
-			// Anticrético en BOB: 5,000 - 5,000,000 Bs
-			if req.Precio < 5000 || req.Precio > 5000000 {
-				return errors.ValidationError("precio", "El monto de anticrético en BOB debe estar entre 5,000 y 5,000,000 Bs")
-			}
-		} else {
-			// Venta en BOB: 1,000 - 500,000,000 Bs
-			if req.Precio < 1000 || req.Precio > 500000000 {
-				return errors.ValidationError("precio", "El precio en BOB debe estar entre 1,000 y 500,000,000 Bs")
-			}
-		}
+	if err := ValidarRangoPrecio(req.Precio, req.Moneda, req.TipoOperacion); err != nil {
+		return err
 	}
 
 	// Validar coordenadas (Bolivia)
-	if req.Latitud != nil && req.Longitud != nil {
-		lat := *req.Latitud
-		lon := *req.Longitud
-		if lat < -23 || lat > -9 {
-			return errors.ValidationError("latitud", "Latitud debe estar dentro de Bolivia (-9° a -23°)")
-		}
-		if lon < -69 || lon > -57 {
-			return errors.ValidationError("longitud", "Longitud debe estar dentro de Bolivia (-69° a -57°)")
-		}
+	if err := ValidarCoordenadasBolivia(req.Latitud, req.Longitud); err != nil {
+		return err
 	}
 
 	// Validar metros edificados

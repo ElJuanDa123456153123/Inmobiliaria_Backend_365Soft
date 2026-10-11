@@ -153,6 +153,10 @@ func (r *PropertyRepository) List(listParams ListPropertyParams) ([]models.Prope
 		query = query.Where("vivienda_social = ?", *listParams.ViviendaSocial)
 	}
 
+	if listParams.Destacado != nil {
+		query = query.Where("destacado = ?", *listParams.Destacado)
+	}
+
 	if listParams.SearchText != "" {
 		searchTerm := "%" + listParams.SearchText + "%"
 		query = query.Where("(titulo ILIKE ? OR descripcion ILIKE ? OR zona ILIKE ? OR direccion ILIKE ?)", searchTerm, searchTerm, searchTerm, searchTerm)
@@ -436,6 +440,7 @@ type ListPropertyParams struct {
 	Condominio     *bool
 	AptoOficina    *bool
 	ViviendaSocial *bool
+	Destacado      *bool
 	SearchText     string
 	UserID         *uint
 	OrderBy        string

@@ -15,6 +15,17 @@ const (
 	PaymentStatusAtrasado  PaymentStatus = "atrasado"  // Pago atrasado
 )
 
+// PaymentType - Tipo de pago de alquiler
+type PaymentType string
+
+const (
+	PaymentTypeCuota              PaymentType = "cuota"               // Cuota mensual
+	PaymentTypeDeposito           PaymentType = "deposito"            // Depósito de garantía
+	PaymentTypeDevolucionDeposito PaymentType = "devolucion_deposito" // Devolución del depósito
+	PaymentTypeAnticres           PaymentType = "anticres"            // Anticrés (pago único inicial del anticrético)
+	PaymentTypeDevolucionAnticres PaymentType = "devolucion_anticres" // Devolución del anticrés al finalizar
+)
+
 // RentPayment - Modelo de pagos de alquiler
 type RentPayment struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
@@ -37,6 +48,9 @@ type RentPayment struct {
 	// Periodo del pago
 	MesCorrespondiente int `gorm:"not null" json:"mes_correspondiente"` // 1 = enero, 12 = diciembre
 	Anio              int `gorm:"not null" json:"anio"`
+
+	// Tipo de pago (cuota mensual, depósito de garantía o devolución del depósito)
+	Tipo PaymentType `gorm:"size:30;not null;default:'cuota'" json:"tipo"`
 
 	// Monto del pago
 	Monto float64 `gorm:"type:decimal(15,2);not null" json:"monto"`

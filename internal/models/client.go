@@ -53,6 +53,17 @@ type Client struct {
 	PropertyID *uint     `gorm:"default:null" json:"property_id,omitempty"`
 	Property   *Property `gorm:"foreignKey:PropertyID" json:"property,omitempty"`
 
+	// === VÍNCULO CON USUARIO DE LA PLATAFORMA ===
+	// Si el cliente también está registrado como usuario, se vincula para usar su
+	// actividad real (vistas, favoritos, búsquedas) en el lead scoring.
+	// Se auto-detecta al crear/editar por coincidencia de email o teléfono.
+	UserID *uint `gorm:"index" json:"user_id,omitempty"`
+	User   *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
+
+	// === PERFIL DE COMPRA CAPTURADO (lead scoring) ===
+	Presupuesto   *float64 `gorm:"type:decimal(15,2)" json:"presupuesto,omitempty"`  // Presupuesto declarado del lead
+	ZonaPreferida string   `gorm:"size:200" json:"zona_preferida,omitempty"`         // Zona de interés declarada
+
 	// === NOTAS Y SEGUIMIENTO ===
 	Notas           string     `gorm:"type:text" json:"notas,omitempty"`
 	ProximoContacto *time.Time `json:"proximo_contacto,omitempty"`

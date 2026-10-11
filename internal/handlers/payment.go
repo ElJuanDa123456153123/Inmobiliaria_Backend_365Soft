@@ -170,7 +170,7 @@ func (h *PaymentHandler) CancelPayment(c *fiber.Ctx) error {
 	})
 }
 
-// GetMyPayments - Obtiene los pagos del usuario autenticado
+// GetMyPayments - Obtiene los pagos del usuario autenticado (pagos QR de planes de publicación)
 func (h *PaymentHandler) GetMyPayments(c *fiber.Ctx) error {
 	userID := c.Locals("user_id")
 	if userID == nil {
@@ -179,10 +179,43 @@ func (h *PaymentHandler) GetMyPayments(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: Implementar listado de pagos del usuario
+	// Convertir user_id a uint
+	userIDUint, ok := userID.(uint)
+	if !ok {
+		if userIDFloat, ok := userID.(float64); ok {
+			userIDUint = uint(userIDFloat)
+		} else {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error obteniendo user_id",
+			})
+		}
+	}
+
+	db, err := config.GetDatabase()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error conectando a la base de datos",
+		})
+	}
+
+	// Filtro opcional por estado (PENDIENTE, PAGADO, CANCELADO, EXPIRADO)
+	estado := c.Query("estado", "")
+
+	query := db.DB.Where("user_id = ?", userIDUint)
+	if estado != "" {
+		query = query.Where("estado = ?", estado)
+	}
+
+	var pagos []models.QrPago
+	if err := query.Preload("Plan").Preload("Property").Order("created_at DESC").Find(&pagos).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo pagos",
+		})
+	}
 
 	return c.JSON(fiber.Map{
-		"message": "Próximamente",
+		"payments": pagos,
+		"total":    len(pagos),
 	})
 }
 

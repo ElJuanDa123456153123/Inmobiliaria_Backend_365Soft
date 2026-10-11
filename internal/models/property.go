@@ -113,6 +113,7 @@ type Property struct {
 	// === ESTADO Y PUBLICACIÓN ===
 	EstadoPropiedad PropertyStatus `gorm:"size:20;not null;default:'activo'" json:"estado_propiedad"`
 	Destacado       bool           `gorm:"default:false" json:"destacado"`
+	Alquilada       bool           `gorm:"default:false" json:"alquilada"` // Tiene contrato de alquiler vigente (badge "Alquilada")
 	VistasContador  int            `gorm:"default:0" json:"vistas_contador"`
 	FechaPublicacion *time.Time    `json:"fecha_publicacion,omitempty"`
 	FechaExpiracion  *time.Time    `json:"fecha_expiracion,omitempty"` // Fecha en que se eliminará automáticamente la publicación

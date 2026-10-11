@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
@@ -107,9 +108,10 @@ func (h *RentPaymentHandler) RegisterPayment(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verificar si ya existe un pago para este mes/año de este contrato
+	// Verificar si ya existe un pago (cuota) para este mes/año de este contrato
 	var existingPayment models.RentPayment
-	if err := h.DB.Where("contract_id = ? AND mes_correspondiente = ? AND anio = ?", contractID, req.MesCorrespondiente, req.Anio).First(&existingPayment).Error; err == nil {
+	if err := h.DB.Where("contract_id = ? AND mes_correspondiente = ? AND anio = ? AND tipo = ?",
+		contractID, req.MesCorrespondiente, req.Anio, models.PaymentTypeCuota).First(&existingPayment).Error; err == nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Ya existe un pago registrado para este período",
 		})
@@ -254,6 +256,32 @@ func (h *RentPaymentHandler) UpdatePaymentStatus(c *fiber.Ctx) error {
 		})
 	}
 
+	// 🔔 Notificar al inquilino según el nuevo estado
+	tipoNotif := "pago_confirmado"
+	tituloNotif := "Pago confirmado"
+	mensajeNotif := "El propietario confirmó tu pago"
+	if req.Estado == string(models.PaymentStatusAtrasado) {
+		tipoNotif = "pago_marco_atrasado"
+		tituloNotif = "Pago marcado como atrasado"
+		mensajeNotif = "El propietario marcó tu pago como atrasado"
+	} else if req.Estado == string(models.PaymentStatusPendiente) {
+		tipoNotif = "pago_rechazado"
+		tituloNotif = "Comprobante rechazado"
+		mensajeNotif = "El propietario rechazó tu comprobante. Vuelve a subirlo o coordina el pago"
+	}
+	var contract models.RentalContract
+	if err := h.DB.Select("property_id").First(&contract, payment.ContractID).Error; err == nil {
+		notif := models.Notification{
+			UserID:     payment.InquilinoID,
+			PropertyID: &contract.PropertyID,
+			Tipo:       tipoNotif,
+			Titulo:     tituloNotif,
+			Mensaje:    mensajeNotif,
+			IsRead:     false,
+		}
+		h.DB.Create(&notif)
+	}
+
 	// Cargar relaciones
 	h.DB.Preload("Contract").Preload("Inquilino").Preload("Vendedor").First(&payment, payment.ID)
 
@@ -307,5 +335,213 @@ func (h *RentPaymentHandler) GetPaymentHistory(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"pagos": payments,
 		"total": len(payments),
+	})
+}
+
+// SubmitComprobanteRequest - Body para subir comprobante de una cuota
+type SubmitComprobanteRequest struct {
+	MetodoPago     string `json:"metodo_pago" validate:"required"` // qr, efectivo, transferencia
+	ComprobanteURL string `json:"comprobante_url" validate:"required"`
+}
+
+// SubmitComprobante - El inquilino sube el comprobante de una cuota (queda pendiente de confirmación)
+// POST /api/rent-payments/:id/comprobante
+func (h *RentPaymentHandler) SubmitComprobante(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	paymentID, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "ID de pago inválido",
+		})
+	}
+
+	var req SubmitComprobanteRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	if strings.TrimSpace(req.MetodoPago) == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "metodo_pago es requerido (qr, efectivo o transferencia)",
+		})
+	}
+	if strings.TrimSpace(req.ComprobanteURL) == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "comprobante_url es requerido",
+		})
+	}
+
+	// El pago debe pertenecer al inquilino autenticado
+	var payment models.RentPayment
+	if err := h.DB.Where("id = ? AND inquilino_id = ?", paymentID, userID).First(&payment).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Pago no encontrado",
+		})
+	}
+
+	if payment.Estado == models.PaymentStatusPagado {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "Este pago ya fue confirmado",
+		})
+	}
+
+	// Registrar el intento de pago: queda pendiente hasta que el dueño confirme
+	payment.MetodoPago = strings.TrimSpace(req.MetodoPago)
+	payment.ComprobanteURL = strings.TrimSpace(req.ComprobanteURL)
+	payment.FechaPago = time.Now()
+
+	if err := h.DB.Save(&payment).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error guardando comprobante",
+		})
+	}
+
+	// 🔔 Notificar al propietario que debe confirmar
+	var contract models.RentalContract
+	if err := h.DB.Select("property_id").First(&contract, payment.ContractID).Error; err == nil {
+		notif := models.Notification{
+			UserID:     payment.VendedorID,
+			PropertyID: &contract.PropertyID,
+			Tipo:       "comprobante_subido",
+			Titulo:     "Nuevo comprobante de pago",
+			Mensaje:    "Tu inquilino subió el comprobante de una cuota. Revísalo y confírmalo",
+			IsRead:     false,
+		}
+		h.DB.Create(&notif)
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Comprobante enviado. El propietario lo confirmará",
+		"pago":    payment,
+	})
+}
+
+// GetPanelTenants - Contratos del propietario con sus inquilinos y resumen de cuotas
+// GET /api/panel/tenants
+func (h *RentPaymentHandler) GetPanelTenants(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	var contracts []models.RentalContract
+	if err := h.DB.Where("vendedor_id = ? AND deleted_at IS NULL", userID).
+		Preload("Property").
+		Preload("Property.PropertyImages", func(db *gorm.DB) *gorm.DB {
+			return db.Order("principal DESC, orden ASC")
+		}).
+		Preload("Inquilino").
+		Order("created_at DESC").
+		Find(&contracts).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error obteniendo contratos",
+		})
+	}
+
+	// Resumen de cuotas por contrato
+	type TenantSummary struct {
+		models.RentalContract
+		CuotasPagadas    int64                 `json:"cuotas_pagadas"`
+		CuotasPendientes int64                 `json:"cuotas_pendientes"`
+		CuotasAtrasadas  int64                 `json:"cuotas_atrasadas"`
+		TotalPagado      float64               `json:"total_pagado"`
+		Pagos            []models.RentPayment  `json:"pagos"`
+	}
+
+	result := make([]TenantSummary, 0, len(contracts))
+	for _, contract := range contracts {
+		summary := TenantSummary{RentalContract: contract}
+
+		h.DB.Model(&models.RentPayment{}).Where("contract_id = ? AND tipo = ? AND estado = ? AND deleted_at IS NULL",
+			contract.ID, models.PaymentTypeCuota, models.PaymentStatusPagado).Count(&summary.CuotasPagadas)
+		h.DB.Model(&models.RentPayment{}).Where("contract_id = ? AND tipo = ? AND estado = ? AND deleted_at IS NULL",
+			contract.ID, models.PaymentTypeCuota, models.PaymentStatusPendiente).Count(&summary.CuotasPendientes)
+		h.DB.Model(&models.RentPayment{}).Where("contract_id = ? AND tipo = ? AND estado = ? AND deleted_at IS NULL",
+			contract.ID, models.PaymentTypeCuota, models.PaymentStatusAtrasado).Count(&summary.CuotasAtrasadas)
+
+		type totalResult struct {
+			Sum float64
+		}
+		var tr totalResult
+		// Suma todo lo efectivamente pagado: cuotas, depósito y anticrés
+		h.DB.Model(&models.RentPayment{}).
+			Select("COALESCE(SUM(monto), 0) as sum").
+			Where("contract_id = ? AND estado = ? AND tipo IN ? AND deleted_at IS NULL",
+				contract.ID, models.PaymentStatusPagado,
+				[]models.PaymentType{models.PaymentTypeCuota, models.PaymentTypeDeposito, models.PaymentTypeAnticres}).
+			Scan(&tr)
+		summary.TotalPagado = tr.Sum
+
+		// Incluir el depósito junto con las cuotas en la lista de pagos
+		h.DB.Where("contract_id = ? AND deleted_at IS NULL", contract.ID).
+			Order("anio ASC, mes_correspondiente ASC, tipo ASC").
+			Find(&summary.Pagos)
+
+		result = append(result, summary)
+	}
+
+	return c.JSON(fiber.Map{
+		"inquilinos": result,
+		"total":      len(result),
+	})
+}
+
+// ConfirmReceipt - El inquilino confirma que recibió la devolución (anticrés o depósito)
+// POST /api/rent-payments/:id/confirm-receipt
+func (h *RentPaymentHandler) ConfirmReceipt(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	paymentID, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "ID de pago inválido",
+		})
+	}
+
+	// El pago debe ser una devolución y pertenecer al inquilino autenticado
+	var payment models.RentPayment
+	if err := h.DB.Where("id = ? AND inquilino_id = ? AND tipo IN ?", paymentID, userID,
+		[]models.PaymentType{models.PaymentTypeDevolucionAnticres, models.PaymentTypeDevolucionDeposito}).
+		First(&payment).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Devolución no encontrada",
+		})
+	}
+
+	if payment.Estado == models.PaymentStatusPagado {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "Esta devolución ya fue confirmada",
+		})
+	}
+
+	payment.Estado = models.PaymentStatusPagado
+	payment.FechaPago = time.Now()
+
+	if err := h.DB.Save(&payment).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error confirmando la devolución",
+		})
+	}
+
+	// 🔔 Notificar al propietario
+	var contract models.RentalContract
+	if err := h.DB.Select("property_id").First(&contract, payment.ContractID).Error; err == nil {
+		tipoTexto := "del depósito"
+		if payment.Tipo == models.PaymentTypeDevolucionAnticres {
+			tipoTexto = "del anticrés"
+		}
+		h.DB.Create(&models.Notification{
+			UserID:     payment.VendedorID,
+			PropertyID: &contract.PropertyID,
+			Tipo:       "devolucion_confirmada",
+			Titulo:     "Devolución confirmada",
+			Mensaje:    "El inquilino confirmó la recepción de la devolución " + tipoTexto,
+			IsRead:     false,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Devolución confirmada",
+		"pago":    payment,
 	})
 }

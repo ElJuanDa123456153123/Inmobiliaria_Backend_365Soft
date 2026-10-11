@@ -109,16 +109,10 @@ func (h *LeadScoringHandler) GetAllLeadScores(c *fiber.Ctx) error {
 // GetTopLeads - Obtiene los mejores leads ordenados por score
 // GET /api/crm/leads/top
 func (h *LeadScoringHandler) GetTopLeads(c *fiber.Ctx) error {
-	// Obtener advisor_id del JWT (opcional, para filtrar por asesor)
+	// Obtener advisor_id del contexto (asesores.id; fallback user_id para admin)
 	var advisorID uint = 0
-
-	userID := c.Locals("user_id")
-	if userID != nil {
-		if userIDUint, ok := userID.(uint); ok {
-			advisorID = userIDUint
-		} else if userIDFloat, ok := userID.(float64); ok {
-			advisorID = uint(userIDFloat)
-		}
+	if id, ok := advisorIDDeContexto(c); ok {
+		advisorID = id
 	}
 
 	// Obtener parámetro limit (default: 20)
@@ -154,16 +148,10 @@ func (h *LeadScoringHandler) GetLeadsByLevel(c *fiber.Ctx) error {
 		})
 	}
 
-	// Obtener advisor_id del JWT (opcional, para filtrar por asesor)
+	// Obtener advisor_id del contexto (asesores.id; fallback user_id para admin)
 	var advisorID uint = 0
-
-	userID := c.Locals("user_id")
-	if userID != nil {
-		if userIDUint, ok := userID.(uint); ok {
-			advisorID = userIDUint
-		} else if userIDFloat, ok := userID.(float64); ok {
-			advisorID = uint(userIDFloat)
-		}
+	if id, ok := advisorIDDeContexto(c); ok {
+		advisorID = id
 	}
 
 	// Obtener leads por nivel
@@ -199,16 +187,10 @@ func (h *LeadScoringHandler) RecalculateAllScores(c *fiber.Ctx) error {
 // GetScoreStats - Obtiene estadísticas de scoring
 // GET /api/crm/leads/scores/stats
 func (h *LeadScoringHandler) GetScoreStats(c *fiber.Ctx) error {
-	// Obtener advisor_id del JWT (opcional, para filtrar por asesor)
+	// Obtener advisor_id del contexto (asesores.id; fallback user_id para admin)
 	var advisorID uint = 0
-
-	userID := c.Locals("user_id")
-	if userID != nil {
-		if userIDUint, ok := userID.(uint); ok {
-			advisorID = userIDUint
-		} else if userIDFloat, ok := userID.(float64); ok {
-			advisorID = uint(userIDFloat)
-		}
+	if id, ok := advisorIDDeContexto(c); ok {
+		advisorID = id
 	}
 
 	// Obtener estadísticas

@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -151,6 +152,27 @@ func (r *RedisClient) InvalidatePropertyLists() error {
 	}
 
 	return nil
+}
+
+// CacheRecommendations - Guarda las recomendaciones precalculadas de un usuario (7 días).
+// Serializa a JSON explícitamente para compatibilidad total con go-redis.
+func (r *RedisClient) CacheRecommendations(userID uint, data interface{}) error {
+	key := fmt.Sprintf("reco:user:%d", userID)
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return r.Client.Set(r.Ctx, key, bytes, 7*24*time.Hour).Err()
+}
+
+// GetCachedRecommendations - Obtiene las recomendaciones precalculadas de un usuario
+func (r *RedisClient) GetCachedRecommendations(userID uint, dest interface{}) error {
+	key := fmt.Sprintf("reco:user:%d", userID)
+	val, err := r.Client.Get(r.Ctx, key).Result()
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(val), dest)
 }
 
 // PublishPropertyUpdate - Publica una actualización de propiedad para tiempo real

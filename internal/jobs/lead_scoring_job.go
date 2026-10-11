@@ -131,7 +131,7 @@ func (j *LeadScoringJob) PrintScoreStats() error {
 		fmt.Printf("  ❄️ BAJO: %.1f%%\n", lowPercentage)
 	}
 
-	fmt.Println("================================\n")
+	fmt.Println("================================")
 	return nil
 }
 

@@ -300,6 +300,7 @@ type ListPropertiesRequest struct {
 	Condominio     *bool   `json:"condominio"`      // true/false
 	AptoOficina    *bool   `json:"apto_oficina"`    // true/false
 	ViviendaSocial *bool   `json:"vivienda_social"` // true/false
+	Destacado      *bool   `json:"destacado"`       // true/false (propiedades destacadas)
 	SearchText     string  `json:"search"`          // Búsqueda en título y descripción
 
 	// === ORDENAMIENTO ===
@@ -425,38 +426,14 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 			req.ViviendaSocial = &val
 		}
 	}
-
-	// 🔒 Validaciones
-	// Validar página
-	if req.Page < 1 {
-		req.Page = 1
+	if destacado := c.Query("destacado"); destacado != "" {
+		if val, err := strconv.ParseBool(destacado); err == nil {
+			req.Destacado = &val
+		}
 	}
 
-	// Validar límite (máximo 100, mínimo 1)
-	if req.Limit < 1 || req.Limit > 100 {
-		req.Limit = 20
-	}
-
-	// Validar ordenamiento
-	validOrderBy := map[string]bool{
-		"precio": true, "fecha": true, "vistas": true, "metros": true,
-	}
-	if !validOrderBy[req.OrderBy] {
-		req.OrderBy = "fecha"
-	}
-
-	// Validar dirección
-	if req.Order != "asc" && req.Order != "desc" {
-		req.Order = "desc"
-	}
-
-	// Validar estado
-	validEstados := map[string]bool{
-		"activo": true, "inactivo": true, "vendido": true,
-	}
-	if req.Estado != "" && !validEstados[req.Estado] {
-		req.Estado = "activo"
-	}
+	// 🔒 Validaciones (normalización de paginación, orden y estado)
+	NormalizeListPropertiesRequest(&req)
 
 	// Validar tipo de operación
 	if req.TipoOperacion != "" {
@@ -482,30 +459,7 @@ func (h *PropertyHandler) ListProperties(c *fiber.Ctx) error {
 	}
 
 	// Construir parámetros para el servicio
-	params := repository.ListPropertyParams{
-		Estado:         req.Estado,
-		TipoOperacion:  req.TipoOperacion,
-		TipoPropiedad:  req.TipoPropiedad,
-		Zona:           req.Zona,
-		Moneda:         req.Moneda,
-		PrecioMin:      req.PrecioMin,
-		PrecioMax:      req.PrecioMax,
-		MetrosMin:      req.MetrosMin,
-		MetrosMax:      req.MetrosMax,
-		Dormitorios:    req.Dormitorios,
-		Banos:          req.Banos,
-		Garaje:         req.Garaje,
-		AceptaPermuta:  req.AceptaPermuta,
-		Financia:       req.Financia,
-		Condominio:     req.Condominio,
-		AptoOficina:    req.AptoOficina,
-		ViviendaSocial: req.ViviendaSocial,
-		SearchText:     req.SearchText,
-		OrderBy:        req.OrderBy,
-		Order:          req.Order,
-		Limit:          req.Limit,
-		Offset:         (req.Page - 1) * req.Limit,
-	}
+	params := BuildListPropertyParams(req)
 
 	// Obtener propiedades a través del servicio
 	properties, total, err := h.PropertyService.ListProperties(params)

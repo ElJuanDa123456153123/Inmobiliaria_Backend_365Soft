@@ -1,556 +1,249 @@
+//go:build integration
+
 package integration
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
-	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/handlers"
-	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/middleware"
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/models"
-	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
 
-// PropertyAPIIntegrationTestSuite - Suite de tests de integración para la API de propiedades
-type PropertyAPIIntegrationTestSuite struct {
+// PropertyAPISuite - Pruebas de integración de los endpoints de propiedades
+type PropertyAPISuite struct {
 	suite.Suite
-	app       *fiber.App
-	db        *config.Database
-	testUser  *models.User
-	testToken string
+	owner      *models.User
+	other      *models.User
+	plan       *models.Plan
+	ownerToken string
+	otherToken string
 }
 
-// SetupSuite - Configuración inicial de la suite
-func (s *PropertyAPIIntegrationTestSuite) SetupSuite() {
-	// Crear app de Fiber
-	s.app = fiber.New(fiber.Config{
-		AppName: "Test API",
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			code := fiber.StatusInternalServerError
-			if e, ok := err.(*fiber.Error); ok {
-				code = e.Code
-			}
-			return c.Status(code).JSON(fiber.Map{
-				"error": err.Error(),
-			})
-		},
-	})
+func (s *PropertyAPISuite) SetupTest() {
+	cleanupTables()
 
-	// Conectar a BD de test
-	s.db = getConfiguredTestDB()
-	assert.NotNil(s.T(), s.db)
+	s.plan = createTestPlan("Plan Gratuito Prueba", 2) // límite: 2 publicaciones
+	s.owner = createTestUser("propietario@integration.test")
+	s.other = createTestUser("intruso@integration.test")
+	createTestSubscription(s.owner.ID, s.plan.ID, 0) // 0 de 2 usadas
 
-	// Crear usuario de prueba
-	passwordHash, _ := hashPassword("Test123*")
-	s.testUser = &models.User{
-		Nombre:   "Test",
-		Apellido: "User",
-		Email:    "test@example.com",
-		Password: passwordHash,
-		Telefono: "123456789",
-		Rol:      models.RoleUsuario,
-		Activo:   true,
-	}
-	s.db.DB.Create(s.testUser)
-
-	// Generar token JWT
-	token, _ := generateJWT(s.testUser.ID, s.testUser.Email, string(s.testUser.Rol))
-	s.testToken = token
-
-	// Inicializar handlers
-	propertyHandler, err := handlers.NewPropertyHandler()
-	assert.NoError(s.T(), err)
-
-	// Configurar rutas
-	api := s.app.Group("/api")
-
-	// Rutas de propiedades
-	api.Get("/properties", propertyHandler.ListProperties)
-	api.Get("/properties/:id", propertyHandler.GetProperty)
-	api.Post("/properties", middleware.AuthMiddleware(), propertyHandler.CreateProperty)
-	api.Get("/properties/my", middleware.AuthMiddleware(), propertyHandler.GetUserProperties)
-	api.Patch("/properties/:id/status", middleware.AuthMiddleware(), propertyHandler.UpdatePropertyStatus)
-	api.Delete("/properties/:id", middleware.AuthMiddleware(), propertyHandler.DeleteProperty)
+	s.ownerToken = generateTestToken(s.owner.ID, s.owner.Email, string(s.owner.Rol))
+	s.otherToken = generateTestToken(s.other.ID, s.other.Email, string(s.other.Rol))
 }
 
-// TearDownSuite - Limpieza después de todos los tests
-func (s *PropertyAPIIntegrationTestSuite) TearDownSuite() {
-	// Limpiar datos de test
-	s.db.DB.Where("email LIKE ?", "%@example.com").Delete(&models.User{})
-	s.db.DB.Where("titulo LIKE ?", "Test Property%").Delete(&models.Property{})
-	s.db.Close()
-}
-
-// SetupTest - Configuración antes de cada test
-func (s *PropertyAPIIntegrationTestSuite) SetupTest() {
-	// Limpiar propiedades de test antes de cada test
-	s.db.DB.Where("titulo LIKE ?", "Test Property%").Delete(&models.Property{})
-}
-
-// TestListProperties_Empty - Test listar propiedades cuando no hay ninguna
-func (s *PropertyAPIIntegrationTestSuite) TestListProperties_Empty() {
-	req := httptest.NewRequest("GET", "/api/properties", nil)
-	resp, err := s.app.Test(req)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 200, resp.StatusCode)
-
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	assert.NoError(s.T(), err)
-
-	assert.Equal(s.T(), float64(0), result["total"])
-	assert.Equal(s.T(), float64(0), result["page"])
-	assert.Equal(s.T(), float64(20), result["limit"])
-}
-
-// TestListProperties_WithFilters - Test listar propiedades con filtros
-func (s *PropertyAPIIntegrationTestSuite) TestListProperties_WithFilters() {
-	// Crear propiedades de prueba
-	property1 := models.Property{
-		UserID:         s.testUser.ID,
-		Titulo:         "Test Property 1 - Venta",
-		TipoOperacion:  models.OperationTypeVenta,
-		Precio:         150000,
-		Moneda:         "USD",
-		TipoPropiedad:  models.PropertyTypeCasa,
-		Zona:           "Centro",
-		Dormitorios:    "3",
-		Banos:          "2",
-		MetrosEdificados: 150,
-		Estado:         "Excelente",
-		Descripcion:    "Test description",
-		EstadoPropiedad: models.PropertyStatusActivo,
-	}
-
-	property2 := models.Property{
-		UserID:         s.testUser.ID,
-		Titulo:         "Test Property 2 - Alquiler",
-		TipoOperacion:  models.OperationTypeAlquiler,
-		Precio:         5000,
-		Moneda:         "USD",
-		TipoPropiedad:  models.PropertyTypeDepartamento,
-		Zona:           "Sur",
-		Dormitorios:    "2",
-		Banos:          "1",
-		MetrosEdificados: 80,
-		Estado:         "Bueno",
-		Descripcion:    "Test description 2",
-		EstadoPropiedad: models.PropertyStatusActivo,
-	}
-
-	s.db.DB.Create(&property1)
-	s.db.DB.Create(&property2)
-
-	tests := []struct {
-		name           string
-		query          string
-		expectedCount  int
-		expectedStatus int
-	}{
-		{
-			name:           "Sin filtros",
-			query:          "/api/properties",
-			expectedCount:  2,
-			expectedStatus: 200,
-		},
-		{
-			name:           "Filtro por tipo de operación - venta",
-			query:          "/api/properties?tipo_operacion=venta",
-			expectedCount:  1,
-			expectedStatus: 200,
-		},
-		{
-			name:           "Filtro por tipo de operación - alquiler",
-			query:          "/api/properties?tipo_operacion=alquiler",
-			expectedCount:  1,
-			expectedStatus: 200,
-		},
-		{
-			name:           "Filtro por moneda - USD",
-			query:          "/api/properties?moneda=USD",
-			expectedCount:  2,
-			expectedStatus: 200,
-		},
-		{
-			name:           "Filtro por zona - Centro",
-			query:          "/api/properties?zona=Centro",
-			expectedCount:  1,
-			expectedStatus: 200,
-		},
-		{
-			name:           "Filtro por precio mínimo",
-			query:          "/api/properties?precio_min=10000",
-			expectedCount:  1,
-			expectedStatus: 200,
-		},
-		{
-			name:           "Paginación - página 1",
-			query:          "/api/properties?page=1&limit=1",
-			expectedCount:  1,
-			expectedStatus: 200,
-		},
-	}
-
-	for _, tt := range tests {
-		s.T().Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", tt.query, nil)
-			resp, err := s.app.Test(req)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, resp.StatusCode)
-
-			var result map[string]interface{}
-			err = json.NewDecoder(resp.Body).Decode(&result)
-			assert.NoError(t, err)
-
-			propiedades := result["propiedades"].([]interface{})
-			assert.Equal(t, tt.expectedCount, len(propiedades))
-		})
-	}
-}
-
-// TestCreateProperty_Success - Test crear propiedad exitosamente
-func (s *PropertyAPIIntegrationTestSuite) TestCreateProperty_Success() {
-	requestBody := map[string]interface{}{
-		"titulo":           "Test Property - Create",
+// validPropertyBody - Cuerpo válido para POST /api/properties
+func validPropertyBody(titulo string) []byte {
+	body, _ := json.Marshal(map[string]interface{}{
+		"titulo":            titulo,
 		"tipo_operacion":    "venta",
-		"precio":           200000,
-		"moneda":           "USD",
-		"acepta_permuta":   false,
-		"financia":         true,
-		"tipo_propiedad":   "casa",
-		"direccion":        "Test Address 123",
-		"zona":             "Norte",
-		"tipo_marcador":    "punto-exacto",
-		"dormitorios":      "4",
-		"banos":            "3",
-		"garaje":           "2",
-		"metros_edificados": 200,
-		"metros_terreno":   300,
-		"estado":           "Excelente",
-		"ano_construccion": 2022,
-		"apto_oficina":     false,
-		"vivienda_social":  false,
-		"condominio":       false,
-		"cantidad_pisos":   2,
-		"descripcion":      "Test property description with enough characters",
-		"terminos_condiciones": "Test terms",
-		"imagenes": []map[string]interface{}{
-			{"url": "/api/imagenes/test.jpg", "orden": 0},
-		},
-	}
+		"precio":            120000,
+		"moneda":            "USD",
+		"tipo_propiedad":    "casa",
+		"direccion":         "Av. Siempre Viva 742",
+		"zona":              "ZonaFiltrosTest",
+		"tipo_marcador":     "punto-exacto",
+		"latitud":           -17.7833,
+		"longitud":          -63.1821,
+		"mostrar_direccion": true,
+		"dormitorios":       "3",
+		"banos":             "2",
+		"garaje":            "1",
+		"metros_edificados": 150,
+		"metros_terreno":    200,
+		"estado":            "Excelente",
+		"ano_construccion":  2018,
+		"descripcion":       "Hermosa casa familiar con jardín y parrillero",
+		"terminos_condiciones": "Términos de prueba",
+	})
+	return body
+}
 
-	jsonBody, _ := json.Marshal(requestBody)
-	req := httptest.NewRequest("POST", "/api/properties", bytes.NewReader(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.testToken)
+// TestCreateProperty_UsuarioDentroDelLimite - Plan con 2 publicaciones, 0 usadas → 201
+// y el contador de la suscripción se incrementa
+func (s *PropertyAPISuite) TestCreateProperty_UsuarioDentroDelLimite() {
+	resp, result := doJSONRequest("POST", "/api/properties", s.ownerToken, validPropertyBody("Casa de prueba dentro del limite"))
 
-	resp, err := s.app.Test(req)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 201, resp.StatusCode)
-
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	assert.NoError(s.T(), err)
-
-	assert.Equal(s.T(), "Propiedad creada exitosamente", result["message"])
-	assert.NotNil(s.T(), result["property"])
+	s.Equal(201, resp.StatusCode)
+	s.Equal("Propiedad creada exitosamente", result["message"])
 
 	property := result["property"].(map[string]interface{})
-	assert.Equal(s.T(), "Test Property - Create", property["titulo"])
-	assert.Equal(s.T(), 200000.0, property["precio"])
-	assert.Equal(s.T(), "USD", property["moneda"])
+	s.Equal("Casa de prueba dentro del limite", property["titulo"])
+	s.Equal("activo", property["estado_propiedad"], "la propiedad se publica activa automáticamente")
+
+	// El contador de la suscripción debe pasar de 0 a 1
+	var sub models.Subscription
+	s.Require().NoError(testDB.DB.Where("user_id = ?", s.owner.ID).First(&sub).Error)
+	s.Equal(1, sub.PropiedadesUsadas, "la publicación consumió 1 cupo del plan")
 }
 
-// TestCreateProperty_ValidationError - Test crear propiedad con errores de validación
-func (s *PropertyAPIIntegrationTestSuite) TestCreateProperty_ValidationError() {
+// TestCreateProperty_UsuarioQueSuperoElLimite - Plan con 2 publicaciones, 2 usadas → 403
+// con error_code LIMIT_REACHED y sin crear la propiedad
+func (s *PropertyAPISuite) TestCreateProperty_UsuarioQueSuperoElLimite() {
+	// Agotar el cupo del plan gratuito (2 de 2)
+	s.Require().NoError(testDB.DB.Model(&models.Subscription{}).
+		Where("user_id = ?", s.owner.ID).
+		Update("propiedades_usadas", 2).Error)
+
+	resp, result := doJSONRequest("POST", "/api/properties", s.ownerToken, validPropertyBody("Casa que no debe crearse"))
+
+	s.Equal(403, resp.StatusCode, "superar el límite del plan debe retornar 403 Forbidden")
+	s.Equal("LIMIT_REACHED", result["error_code"])
+	s.Contains(result["error"], "límite")
+	s.Equal(2.0, result["limit"], "la respuesta informa el límite del plan")
+	s.Equal(2.0, result["used"], "la respuesta informa el uso actual")
+
+	// Verificar que NO se creó ninguna propiedad
+	var count int64
+	testDB.DB.Model(&models.Property{}).Where("user_id = ?", s.owner.ID).Count(&count)
+	s.Equal(int64(0), count)
+}
+
+// TestCreateProperty_SinAutenticacion - Sin token: 401
+func (s *PropertyAPISuite) TestCreateProperty_SinAutenticacion() {
+	resp, _ := doJSONRequest("POST", "/api/properties", "", validPropertyBody("Casa sin token"))
+
+	s.Equal(401, resp.StatusCode)
+}
+
+// TestUpdateProperty_UsuarioNoPropietario - PATCH /properties/:id/status de otro dueño → 403
+// (equivalente de "PUT /propiedades/:id usuario no propietario": la actualización de
+// propiedades del dueño se expone como PATCH .../status en cmd/api/main.go)
+func (s *PropertyAPISuite) TestUpdateProperty_UsuarioNoPropietario() {
+	property := createTestPropertyDirect(s.owner.ID, "Casa del propietario", "venta", "USD", 150000, models.PropertyTypeCasa, "ZonaFiltrosTest", "3", models.PropertyStatusActivo)
+
+	body, _ := json.Marshal(map[string]string{"estado": "vendido"})
+	resp, result := doJSONRequest("PATCH", fmt.Sprintf("/api/properties/%d/status", property.ID), s.otherToken, body)
+
+	s.Equal(403, resp.StatusCode, "un usuario que no es el dueño recibe 403 Forbidden")
+	s.Contains(result["error"], "permiso")
+
+	// El estado de la propiedad no cambió
+	var current models.Property
+	s.Require().NoError(testDB.DB.First(&current, property.ID).Error)
+	s.Equal(models.PropertyStatusActivo, current.EstadoPropiedad)
+}
+
+// TestDeleteProperty_EliminacionLogica - DELETE hace soft delete: desaparece de la API
+// pero el registro persiste en BD con deleted_at (no es borrado físico)
+func (s *PropertyAPISuite) TestDeleteProperty_EliminacionLogica() {
+	property := createTestPropertyDirect(s.owner.ID, "Casa para eliminar logicamente", "venta", "USD", 90000, models.PropertyTypeCasa, "ZonaFiltrosTest", "2", models.PropertyStatusActivo)
+
+	resp, result := doJSONRequest("DELETE", fmt.Sprintf("/api/properties/%d", property.ID), s.ownerToken, nil)
+
+	s.Equal(200, resp.StatusCode)
+	s.Contains(result["message"], "eliminada")
+
+	// 1) La API ya no la expone (GET → 404)
+	respGet, _ := doJSONRequest("GET", fmt.Sprintf("/api/properties/%d", property.ID), "", nil)
+	s.Equal(404, respGet.StatusCode)
+
+	// 2) El registro SIGUE en la BD (eliminación lógica, no física) con deleted_at asignado
+	var deleted models.Property
+	s.Require().NoError(testDB.DB.Unscoped().First(&deleted, property.ID).Error,
+		"el registro debe seguir existiendo físicamente en la base de datos")
+	s.True(deleted.DeletedAt.Valid, "deleted_at debe estar asignado (soft delete de GORM)")
+	s.NotZero(deleted.DeletedAt.Time)
+}
+
+// TestDeleteProperty_UsuarioNoPropietario - DELETE de propiedad ajena → 403
+func (s *PropertyAPISuite) TestDeleteProperty_UsuarioNoPropietario() {
+	property := createTestPropertyDirect(s.owner.ID, "Casa ajena intocable", "venta", "USD", 95000, models.PropertyTypeCasa, "ZonaFiltrosTest", "2", models.PropertyStatusActivo)
+
+	resp, _ := doJSONRequest("DELETE", fmt.Sprintf("/api/properties/%d", property.ID), s.otherToken, nil)
+
+	s.Equal(403, resp.StatusCode)
+
+	var count int64
+	testDB.DB.Unscoped().Model(&models.Property{}).Where("id = ?", property.ID).Count(&count)
+	s.Equal(int64(1), count, "la propiedad no debe eliminarse")
+}
+
+// TestListProperties_FiltrosCombinados - GET /api/properties combinando varios filtros
+func (s *PropertyAPISuite) TestListProperties_FiltrosCombinados() {
+	// Fixtures: 3 activas + 1 inactiva (el listado público por defecto solo muestra activas)
+	propA := createTestPropertyDirect(s.owner.ID, "Casa cara zona test", "venta", "USD", 120000, models.PropertyTypeCasa, "ZonaFiltrosTest", "3", models.PropertyStatusActivo)
+	propB := createTestPropertyDirect(s.owner.ID, "Casa economica zona test", "venta", "USD", 80000, models.PropertyTypeCasa, "ZonaFiltrosTest", "2", models.PropertyStatusActivo)
+	propC := createTestPropertyDirect(s.owner.ID, "Departamento alquiler otra zona", "alquiler", "BOB", 3500, models.PropertyTypeDepartamento, "OtraZonaTest", "1", models.PropertyStatusActivo)
+	createTestPropertyDirect(s.owner.ID, "Casa inactiva zona test", "venta", "USD", 95000, models.PropertyTypeCasa, "ZonaFiltrosTest", "3", models.PropertyStatusInactivo)
+
 	tests := []struct {
-		name          string
-		requestBody   map[string]interface{}
-		expectedError string
+		name        string
+		query       string
+		wantTitles  []string
 	}{
 		{
-			name: "Título muy corto",
-			requestBody: map[string]interface{}{
-				"titulo":        "Casa",
-				"tipo_operacion": "venta",
-				"precio":        150000,
-				"moneda":        "USD",
-				"dormitorios":   "3",
-				"banos":         "2",
-				"metros_edificados": 150,
-				"estado":        "Excelente",
-				"descripcion":   "Descripción válida de la propiedad",
-			},
-			expectedError: "título",
+			name:       "sin_filtros_muestra_solo_activas",
+			query:      "/api/properties",
+			wantTitles: []string{propA.Titulo, propB.Titulo, propC.Titulo},
 		},
 		{
-			name: "Precio inválido",
-			requestBody: map[string]interface{}{
-				"titulo":        "Título válido de la propiedad",
-				"tipo_operacion": "venta",
-				"precio":        50, // Muy bajo para USD
-				"moneda":        "USD",
-				"dormitorios":   "3",
-				"banos":         "2",
-				"metros_edificados": 150,
-				"estado":        "Excelente",
-				"descripcion":   "Descripción válida de la propiedad",
-			},
-			expectedError: "precio",
+			name:       "tipo_operacion_venta",
+			query:      "/api/properties?tipo_operacion=venta",
+			wantTitles: []string{propA.Titulo, propB.Titulo},
 		},
 		{
-			name: "Descripción muy corta",
-			requestBody: map[string]interface{}{
-				"titulo":        "Título válido de la propiedad",
-				"tipo_operacion": "venta",
-				"precio":        150000,
-				"moneda":        "USD",
-				"dormitorios":   "3",
-				"banos":         "2",
-				"metros_edificados": 150,
-				"estado":        "Excelente",
-				"descripcion":   "Corta",
-			},
-			expectedError: "descripción",
+			name:       "tipo_operacion_y_moneda",
+			query:      "/api/properties?tipo_operacion=alquiler&moneda=BOB",
+			wantTitles: []string{propC.Titulo},
+		},
+		{
+			name:       "rango_de_precio",
+			query:      "/api/properties?tipo_operacion=venta&moneda=USD&precio_min=100000&precio_max=130000",
+			wantTitles: []string{propA.Titulo},
+		},
+		{
+			name:       "zona_y_dormitorios",
+			query:      "/api/properties?zona=ZonaFiltrosTest&dormitorios=2",
+			wantTitles: []string{propB.Titulo},
+		},
+		{
+			name:       "todos_combinados",
+			query:      "/api/properties?tipo_operacion=venta&moneda=USD&precio_min=50000&precio_max=100000&zona=ZonaFiltrosTest&dormitorios=2&banos=2",
+			wantTitles: []string{propB.Titulo},
+		},
+		{
+			name:       "sin_resultados",
+			query:      "/api/properties?tipo_operacion=venta&precio_min=1000000",
+			wantTitles: []string{},
 		},
 	}
 
-	for _, tt := range tests {
-		s.T().Run(tt.name, func(t *testing.T) {
-			jsonBody, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("POST", "/api/properties", bytes.NewReader(jsonBody))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer "+s.testToken)
+	for _, tc := range tests {
+		s.T().Run(tc.name, func(t *testing.T) {
+			resp, result := doJSONRequest("GET", tc.query, "", nil)
 
-			resp, err := s.app.Test(req)
-			assert.NoError(t, err)
-			assert.Equal(t, 400, resp.StatusCode)
+			if !assert.Equal(t, 200, resp.StatusCode) {
+				return
+			}
 
-			var result map[string]interface{}
-			err = json.NewDecoder(resp.Body).Decode(&result)
-			assert.NoError(t, err)
+			list, _ := result["propiedades"].([]interface{})
+			gotTitles := make([]string, 0, len(list))
+			for _, item := range list {
+				p := item.(map[string]interface{})
+				gotTitles = append(gotTitles, p["titulo"].(string))
+			}
 
-			assert.Contains(t, result["error"], tt.expectedError)
+			assert.ElementsMatch(t, tc.wantTitles, gotTitles)
+			assert.Equal(t, float64(len(tc.wantTitles)), result["total"], "el total debe coincidir con los resultados")
 		})
 	}
 }
 
-// TestGetProperty_Success - Test obtener propiedad por ID
-func (s *PropertyAPIIntegrationTestSuite) TestGetProperty_Success() {
-	// Crear propiedad de prueba
-	property := models.Property{
-		UserID:         s.testUser.ID,
-		Titulo:         "Test Property - Get",
-		TipoOperacion:  models.OperationTypeVenta,
-		Precio:         180000,
-		Moneda:         "USD",
-		TipoPropiedad:  models.PropertyTypeCasa,
-		Zona:           "Centro",
-		Dormitorios:    "3",
-		Banos:          "2",
-		MetrosEdificados: 180,
-		Estado:         "Excelente",
-		Descripcion:    "Test description for get property",
-		EstadoPropiedad: models.PropertyStatusActivo,
-		VistasContador: 0,
-	}
-	s.db.DB.Create(&property)
+// TestGetPropertyDetalle - GET /api/properties/:id expone el detalle de una propiedad
+func (s *PropertyAPISuite) TestGetPropertyDetalle() {
+	property := createTestPropertyDirect(s.owner.ID, "Casa visible en detalle", "venta", "USD", 175000, models.PropertyTypeCasa, "ZonaFiltrosTest", "4", models.PropertyStatusActivo)
 
-	req := httptest.NewRequest("GET", fmt.Sprintf("/api/properties/%d", property.ID), nil)
-	resp, err := s.app.Test(req)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 200, resp.StatusCode)
+	resp, result := doJSONRequest("GET", fmt.Sprintf("/api/properties/%d", property.ID), "", nil)
 
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	assert.NoError(s.T(), err)
-
-	assert.Equal(s.T(), "Test Property - Get", result["titulo"])
-	assert.Equal(s.T(), float64(180000), result["precio"])
-	assert.Equal(s.T(), "USD", result["moneda"])
+	s.Equal(200, resp.StatusCode)
+	s.Equal(property.Titulo, result["titulo"])
+	s.Equal(175000.0, result["precio"])
+	s.Equal("USD", result["moneda"])
 }
 
-// TestGetProperty_NotFound - Test obtener propiedad inexistente
-func (s *PropertyAPIIntegrationTestSuite) TestGetProperty_NotFound() {
-	req := httptest.NewRequest("GET", "/api/properties/999999", nil)
-	resp, err := s.app.Test(req)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 404, resp.StatusCode)
-
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	assert.NoError(s.T(), err)
-
-	assert.Contains(s.T(), result["error"], "no encontrada")
-}
-
-// TestUpdatePropertyStatus_Success - Test actualizar estado de propiedad
-func (s *PropertyAPIIntegrationTestSuite) TestUpdatePropertyStatus_Success() {
-	// Crear propiedad de prueba
-	property := models.Property{
-		UserID:         s.testUser.ID,
-		Titulo:         "Test Property - Update Status",
-		TipoOperacion:  models.OperationTypeVenta,
-		Precio:         200000,
-		Moneda:         "USD",
-		TipoPropiedad:  models.PropertyTypeCasa,
-		Zona:           "Centro",
-		Dormitorios:    "3",
-		Banos:          "2",
-		MetrosEdificados: 200,
-		Estado:         "Excelente",
-		Descripcion:    "Test description",
-		EstadoPropiedad: models.PropertyStatusActivo,
-	}
-	s.db.DB.Create(&property)
-
-	requestBody := map[string]interface{}{
-		"estado": "vendido",
-	}
-	jsonBody, _ := json.Marshal(requestBody)
-
-	req := httptest.NewRequest("PATCH", fmt.Sprintf("/api/properties/%d/status", property.ID), bytes.NewReader(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.testToken)
-
-	resp, err := s.app.Test(req)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 200, resp.StatusCode)
-
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	assert.NoError(s.T(), err)
-
-	propiedad := result["property"].(map[string]interface{})
-	assert.Equal(s.T(), "vendido", propiedad["estado_propiedad"])
-}
-
-// TestDeleteProperty_Success - Test eliminar propiedad
-func (s *PropertyAPIIntegrationTestSuite) TestDeleteProperty_Success() {
-	// Crear propiedad de prueba
-	property := models.Property{
-		UserID:         s.testUser.ID,
-		Titulo:         "Test Property - Delete",
-		TipoOperacion:  models.OperationTypeVenta,
-		Precio:         250000,
-		Moneda:         "USD",
-		TipoPropiedad:  models.PropertyTypeCasa,
-		Zona:           "Norte",
-		Dormitorios:    "4",
-		Banos:          "3",
-		MetrosEdificados: 250,
-		Estado:         "Excelente",
-		Descripcion:    "Test description for delete",
-		EstadoPropiedad: models.PropertyStatusActivo,
-	}
-	s.db.DB.Create(&property)
-
-	req := httptest.NewRequest("DELETE", fmt.Sprintf("/api/properties/%d", property.ID), nil)
-	req.Header.Set("Authorization", "Bearer "+s.testToken)
-
-	resp, err := s.app.Test(req)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 200, resp.StatusCode)
-
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	assert.NoError(s.T(), err)
-
-	assert.Contains(s.T(), result["message"], "eliminada")
-
-	// Verificar que fue soft delete (ya no debería aparecer en listas)
-	req2 := httptest.NewRequest("GET", "/api/properties", nil)
-	resp2, err := s.app.Test(req2)
-	assert.NoError(s.T(), err)
-
-	var result2 map[string]interface{}
-	err = json.NewDecoder(resp2.Body).Decode(&result2)
-	assert.NoError(s.T(), err)
-
-	assert.Equal(s.T(), float64(0), result2["total"])
-}
-
-// TestGetUserProperties_Success - Test obtener propiedades del usuario
-func (s *PropertyAPIIntegrationTestSuite) TestGetUserProperties_Success() {
-	// Crear propiedades del usuario
-	property1 := models.Property{
-		UserID:         s.testUser.ID,
-		Titulo:         "Test Property - User 1",
-		TipoOperacion:  models.OperationTypeVenta,
-		Precio:         150000,
-		Moneda:         "USD",
-		TipoPropiedad:  models.PropertyTypeCasa,
-		Zona:           "Centro",
-		Dormitorios:    "3",
-		Banos:          "2",
-		MetrosEdificados: 150,
-		Estado:         "Excelente",
-		Descripcion:    "Test description",
-		EstadoPropiedad: models.PropertyStatusActivo,
-	}
-
-	property2 := models.Property{
-		UserID:         s.testUser.ID,
-		Titulo:         "Test Property - User 2",
-		TipoOperacion:  models.OperationTypeAlquiler,
-		Precio:         5000,
-		Moneda:         "USD",
-		TipoPropiedad:  models.PropertyTypeDepartamento,
-		Zona:           "Sur",
-		Dormitorios:    "2",
-		Banos:          "1",
-		MetrosEdificados: 80,
-		Estado:         "Bueno",
-		Descripcion:    "Test description 2",
-		EstadoPropiedad: models.PropertyStatusActivo,
-	}
-
-	s.db.DB.Create(&property1)
-	s.db.DB.Create(&property2)
-
-	req := httptest.NewRequest("GET", "/api/properties/my", nil)
-	req.Header.Set("Authorization", "Bearer "+s.testToken)
-
-	resp, err := s.app.Test(req)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 200, resp.StatusCode)
-
-	var result []map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	assert.NoError(s.T(), err)
-
-	assert.Equal(s.T(), 2, len(result))
-	assert.Equal(s.T(), "Test Property - User 1", result[0]["titulo"])
-}
-
-// TestPropertyAPIIntegrationTestSuite - Ejecutar la suite
-func TestPropertyAPIIntegrationTestSuite(t *testing.T) {
-	suite.Run(t, new(PropertyAPIIntegrationTestSuite))
-}
-
-// Helper functions
-
-func getConfiguredTestDB() *config.Database {
-	// Usar DATABASE_URL de test o crear una
-	dsn := "host=localhost port=5432 user=postgres password=password dbname=inmobiliaria_test sslmode=disable"
-	db, err := config.NewDatabaseFromDSN(dsn)
-	if err != nil {
-		panic("Error conectando a BD de test: " + err.Error())
-	}
-	return db
-}
-
-func hashPassword(password string) (string, error) {
-	// Simplificado - en producción usar bcrypt
-	return password + "_hashed", nil
-}
-
-func generateJWT(userID uint, email, rol string) (string, error) {
-	// Simplificado - en producción usar jwt real
-	return "test_token_" + fmt.Sprint(userID), nil
+func TestPropertyAPISuite(t *testing.T) {
+	suite.Run(t, new(PropertyAPISuite))
 }

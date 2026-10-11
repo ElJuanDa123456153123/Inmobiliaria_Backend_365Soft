@@ -34,6 +34,23 @@ func NewCrmHandler() (*CrmHandler, error) {
 	}, nil
 }
 
+// advisorIDDeContexto - Obtiene el ID del ASESOR (PK de la tabla asesores) desde el contexto.
+// El middleware AdminOrAdvisorMiddleware inyecta el advisor completo en Locals("advisor");
+// usar su ID es lo correcto porque clients.advisor_id tiene FK hacia asesores.id.
+// Fallback: user_id (admins sin perfil de asesor, comportamiento previo).
+func advisorIDDeContexto(c *fiber.Ctx) (uint, bool) {
+	if adv, ok := c.Locals("advisor").(*models.Advisor); ok && adv != nil {
+		return adv.ID, true
+	}
+	if uid, ok := c.Locals("user_id").(uint); ok {
+		return uid, true
+	}
+	if f, ok := c.Locals("user_id").(float64); ok {
+		return uint(f), true
+	}
+	return 0, false
+}
+
 // ==================== CLIENTES ====================
 
 // CreateClient - Crea un nuevo cliente
@@ -46,25 +63,12 @@ func (h *CrmHandler) CreateClient(c *fiber.Ctx) error {
 		})
 	}
 
-	// Obtener advisor_id del JWT (del middleware de autenticación)
-	advisorID := c.Locals("user_id")
-	if advisorID == nil {
+	// Obtener advisor_id del contexto (asesores.id, no user_id)
+	advisorIDUint, ok := advisorIDDeContexto(c)
+	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "No autorizado",
 		})
-	}
-
-	// Convertir advisor_id a uint
-	advisorIDUint, ok := advisorID.(uint)
-	if !ok {
-		// Intentar convertir desde float64 (JSON numbers)
-		if advisorIDFloat, ok := advisorID.(float64); ok {
-			advisorIDUint = uint(advisorIDFloat)
-		} else {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error obteniendo advisor_id",
-			})
-		}
 	}
 
 	req.AdvisorID = advisorIDUint
@@ -154,24 +158,12 @@ func (h *CrmHandler) DeleteClient(c *fiber.Ctx) error {
 
 // ListClients - Lista clientes con filtros
 func (h *CrmHandler) ListClients(c *fiber.Ctx) error {
-	// Obtener advisor_id del JWT
-	advisorID := c.Locals("user_id")
-	if advisorID == nil {
+	// Obtener advisor_id del contexto (asesores.id, no user_id)
+	advisorIDUint, ok := advisorIDDeContexto(c)
+	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "No autorizado",
 		})
-	}
-
-	// Convertir advisor_id a uint
-	advisorIDUint, ok := advisorID.(uint)
-	if !ok {
-		if advisorIDFloat, ok := advisorID.(float64); ok {
-			advisorIDUint = uint(advisorIDFloat)
-		} else {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error obteniendo advisor_id",
-			})
-		}
 	}
 
 	// Obtener parámetros de query
@@ -213,23 +205,12 @@ func (h *CrmHandler) ListClients(c *fiber.Ctx) error {
 // GetFunnelStats - Obtiene las estadísticas del embudo de ventas
 func (h *CrmHandler) GetFunnelStats(c *fiber.Ctx) error {
 	// Obtener advisor_id del JWT
-	advisorID := c.Locals("user_id")
-	if advisorID == nil {
+	// Obtener advisor_id del contexto (asesores.id, no user_id)
+	advisorIDUint, ok := advisorIDDeContexto(c)
+	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "No autorizado",
 		})
-	}
-
-	// Convertir advisor_id a uint
-	advisorIDUint, ok := advisorID.(uint)
-	if !ok {
-		if advisorIDFloat, ok := advisorID.(float64); ok {
-			advisorIDUint = uint(advisorIDFloat)
-		} else {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error obteniendo advisor_id",
-			})
-		}
 	}
 
 	// Obtener estadísticas
@@ -245,24 +226,12 @@ func (h *CrmHandler) GetFunnelStats(c *fiber.Ctx) error {
 
 // GetUpcomingContacts - Obtiene próximos contactos pendientes
 func (h *CrmHandler) GetUpcomingContacts(c *fiber.Ctx) error {
-	// Obtener advisor_id del JWT
-	advisorID := c.Locals("user_id")
-	if advisorID == nil {
+	// Obtener advisor_id del contexto (asesores.id, no user_id)
+	advisorIDUint, ok := advisorIDDeContexto(c)
+	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "No autorizado",
 		})
-	}
-
-	// Convertir advisor_id a uint
-	advisorIDUint, ok := advisorID.(uint)
-	if !ok {
-		if advisorIDFloat, ok := advisorID.(float64); ok {
-			advisorIDUint = uint(advisorIDFloat)
-		} else {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error obteniendo advisor_id",
-			})
-		}
 	}
 
 	// Obtener días (default: 7)
@@ -291,24 +260,12 @@ func (h *CrmHandler) CreateInteraction(c *fiber.Ctx) error {
 		})
 	}
 
-	// Obtener advisor_id del JWT
-	advisorID := c.Locals("user_id")
-	if advisorID == nil {
+	// Obtener advisor_id del contexto (asesores.id, no user_id)
+	advisorIDUint, ok := advisorIDDeContexto(c)
+	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "No autorizado",
 		})
-	}
-
-	// Convertir advisor_id a uint
-	advisorIDUint, ok := advisorID.(uint)
-	if !ok {
-		if advisorIDFloat, ok := advisorID.(float64); ok {
-			advisorIDUint = uint(advisorIDFloat)
-		} else {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Error obteniendo advisor_id",
-			})
-		}
 	}
 
 	req.AdvisorID = advisorIDUint

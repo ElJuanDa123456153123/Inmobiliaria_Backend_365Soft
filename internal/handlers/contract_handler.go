@@ -287,7 +287,150 @@ func (h *ContractHandler) UpdateContract(c *fiber.Ctx) error {
 	})
 }
 
-// GeneratePDF - Genera PDF del contrato (placeholder)
+// TerminateContract - El propietario termina el contrato (anticipadamente o al vencimiento).
+// Genera el pago de devolución (anticrés y/o depósito) pendiente de confirmación por el inquilino
+// POST /api/contracts/:id/terminate
+func (h *ContractHandler) TerminateContract(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	contractID, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "ID de contrato inválido",
+		})
+	}
+
+	// Verificar que el contrato existe y pertenece al propietario
+	var contract models.RentalContract
+	if err := h.DB.Where("id = ? AND vendedor_id = ? AND deleted_at IS NULL", contractID, userID).
+		Preload("Property").
+		Preload("Inquilino").
+		First(&contract).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Contrato no encontrado",
+		})
+	}
+
+	if contract.Estado != models.ContractStatusActivo {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "El contrato ya no está activo (estado: " + string(contract.Estado) + ")",
+		})
+	}
+
+	now := time.Now()
+
+	err = h.DB.Transaction(func(tx *gorm.DB) error {
+		// 1. Contrato → terminado
+		if err := tx.Model(&models.RentalContract{}).Where("id = ?", contract.ID).
+			Update("estado", models.ContractStatusTerminado).Error; err != nil {
+			return err
+		}
+
+		// 2. Liberar la propiedad si no tiene otros contratos activos
+		var activeCount int64
+		if err := tx.Model(&models.RentalContract{}).
+			Where("property_id = ? AND id != ? AND estado = ? AND deleted_at IS NULL",
+				contract.PropertyID, contract.ID, models.ContractStatusActivo).
+			Count(&activeCount).Error; err != nil {
+			return err
+		}
+		if activeCount == 0 {
+			if err := tx.Model(&models.Property{}).Where("id = ?", contract.PropertyID).
+				Update("alquilada", false).Error; err != nil {
+				return err
+			}
+		}
+
+		// 3. Generar devolución del anticrés (anticrético) si aún no existe
+		if contract.TipoContrato == models.ContractTypeAnticretico {
+			var devolucionCount int64
+			tx.Model(&models.RentPayment{}).
+				Where("contract_id = ? AND tipo = ? AND deleted_at IS NULL", contract.ID, models.PaymentTypeDevolucionAnticres).
+				Count(&devolucionCount)
+			if devolucionCount == 0 {
+				// El monto a devolver es el del pago de anticrés registrado
+				var anticres models.RentPayment
+				montoDevolucion := 0.0
+				if err := tx.Where("contract_id = ? AND tipo = ? AND deleted_at IS NULL", contract.ID, models.PaymentTypeAnticres).
+					Order("created_at DESC").First(&anticres).Error; err == nil {
+					montoDevolucion = anticres.Monto
+				}
+				devolucion := models.RentPayment{
+					ContractID:         contract.ID,
+					InquilinoID:        contract.InquilinoID,
+					VendedorID:         contract.VendedorID,
+					MesCorrespondiente: int(now.Month()),
+					Anio:               now.Year(),
+					Tipo:               models.PaymentTypeDevolucionAnticres,
+					Monto:              montoDevolucion,
+					FechaPago:          now,
+					Estado:             models.PaymentStatusPendiente,
+				}
+				if err := tx.Create(&devolucion).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		// 4. Generar devolución del depósito (alquiler) si aplica y aún no existe
+		if contract.TipoContrato != models.ContractTypeAnticretico && contract.MontoDeposito > 0 {
+			var devolucionCount int64
+			tx.Model(&models.RentPayment{}).
+				Where("contract_id = ? AND tipo = ? AND deleted_at IS NULL", contract.ID, models.PaymentTypeDevolucionDeposito).
+				Count(&devolucionCount)
+			if devolucionCount == 0 {
+				devolucion := models.RentPayment{
+					ContractID:         contract.ID,
+					InquilinoID:        contract.InquilinoID,
+					VendedorID:         contract.VendedorID,
+					MesCorrespondiente: int(now.Month()),
+					Anio:               now.Year(),
+					Tipo:               models.PaymentTypeDevolucionDeposito,
+					Monto:              contract.MontoDeposito,
+					FechaPago:          now,
+					Estado:             models.PaymentStatusPendiente,
+				}
+				if err := tx.Create(&devolucion).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error terminando el contrato: " + err.Error(),
+		})
+	}
+
+	// 🔔 Notificar al inquilino
+	mensaje := "El contrato de \"" + contract.Property.Titulo + "\" finalizó."
+	if contract.TipoContrato == models.ContractTypeAnticretico {
+		mensaje += " El propietario debe registrar la devolución de tu anticrés. Confírmala cuando la recibas"
+	} else if contract.MontoDeposito > 0 {
+		mensaje += " El propietario debe registrar la devolución de tu depósito. Confírmala cuando la recibas"
+	}
+	h.DB.Create(&models.Notification{
+		UserID:     contract.InquilinoID,
+		PropertyID: &contract.PropertyID,
+		Tipo:       "contrato_finalizado",
+		Titulo:     "Contrato finalizado",
+		Mensaje:    mensaje,
+		IsRead:     false,
+	})
+
+	// Cargar contrato actualizado
+	h.DB.Preload("Property").Preload("Inquilino").Preload("Vendedor").First(&contract, contract.ID)
+
+	return c.JSON(fiber.Map{
+		"message":  "Contrato finalizado. Devolución registrada pendiente de confirmación",
+		"contrato": contract,
+	})
+}
+
+// GeneratePDF - Genera y descarga el PDF del contrato
 // GET /api/contracts/:id/pdf
 func (h *ContractHandler) GeneratePDF(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uint)
@@ -311,13 +454,15 @@ func (h *ContractHandler) GeneratePDF(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: Implementar generación real de PDF
-	// Por ahora retornar URL placeholder
-	pdfURL := fmt.Sprintf("/api/contracts/%d/document", contractID)
+	pdfBytes, err := generarPDFContrato(&contract)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error generando PDF: " + err.Error(),
+		})
+	}
 
-	return c.JSON(fiber.Map{
-		"message":  "PDF generado exitosamente",
-		"pdf_url":  pdfURL,
-		"contrato": contract,
-	})
+	filename := fmt.Sprintf("contrato-%d.pdf", contract.ID)
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	return c.Send(pdfBytes)
 }

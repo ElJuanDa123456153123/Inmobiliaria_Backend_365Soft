@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+// ========== MOCKS (implementan las interfaces actuales de repository) ==========
+
 // MockPropertyRepository - Mock del repositorio de propiedades
 type MockPropertyRepository struct {
 	mock.Mock
@@ -29,12 +31,20 @@ func (m *MockPropertyRepository) GetByID(id uint) (*models.Property, error) {
 	return args.Get(0).(*models.Property), args.Error(1)
 }
 
-func (m *MockPropertyRepository) List(params repository.ListPropertyParams) ([]models.Property, int64, error) {
-	args := m.Called(params)
+func (m *MockPropertyRepository) GetByIDWithUser(id uint) (*models.Property, error) {
+	args := m.Called(id)
 	if args.Get(0) == nil {
-		return nil, args.Get(1).(int64), args.Error(2)
+		return nil, args.Error(1)
 	}
-	return args.Get(0).([]models.Property), args.Get(1).(int64), args.Error(2)
+	return args.Get(0).(*models.Property), args.Error(1)
+}
+
+func (m *MockPropertyRepository) GetByIDWithRelations(id uint) (*models.Property, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Property), args.Error(1)
 }
 
 func (m *MockPropertyRepository) Update(property *models.Property) error {
@@ -47,7 +57,7 @@ func (m *MockPropertyRepository) Delete(property *models.Property) error {
 	return args.Error(0)
 }
 
-func (m *MockPropertyRepository) List(params ListPropertyParams) ([]models.Property, int64, error) {
+func (m *MockPropertyRepository) List(params repository.ListPropertyParams) ([]models.Property, int64, error) {
 	args := m.Called(params)
 	if args.Get(0) == nil {
 		return nil, args.Get(1).(int64), args.Error(2)
@@ -76,6 +86,22 @@ func (m *MockPropertyRepository) CountByUserID(userID uint) (int64, error) {
 func (m *MockPropertyRepository) ExistsByID(id uint) (bool, error) {
 	args := m.Called(id)
 	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockPropertyRepository) FullTextSearch(query string, limit, offset int) ([]models.Property, int64, error) {
+	args := m.Called(query, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Get(1).(int64), args.Error(2)
+	}
+	return args.Get(0).([]models.Property), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockPropertyRepository) FullTextSearchWithFilters(query string, filters repository.ListSearchParams, limit, offset int) ([]models.Property, int64, error) {
+	args := m.Called(query, filters, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Get(1).(int64), args.Error(2)
+	}
+	return args.Get(0).([]models.Property), args.Get(1).(int64), args.Error(2)
 }
 
 // MockPropertyImageRepository - Mock del repositorio de imágenes
@@ -250,42 +276,27 @@ func (m *MockAuditRepository) GetByAction(action string, limit int) ([]models.Au
 	return args.Get(0).([]models.AuditLog), args.Error(1)
 }
 
-// TestPropertyService_CreateProperty_Success - Test creación exitosa de propiedad
-func TestPropertyService_CreateProperty_Success(t *testing.T) {
-	// Setup
+// ========== FIXTURES ==========
+
+// newServiceWithMocks - Crea el servicio con mocks (db nil: los tests usan rutas que no tocan la BD)
+func newServiceWithMocks() (*PropertyService, *MockPropertyRepository, *MockPropertyImageRepository, *MockUserRepository, *MockAuditRepository) {
 	mockPropertyRepo := new(MockPropertyRepository)
 	mockImageRepo := new(MockPropertyImageRepository)
 	mockUserRepo := new(MockUserRepository)
 	mockAuditRepo := new(MockAuditRepository)
 
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
+	svc := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo, nil, nil)
+	return svc, mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo
+}
 
-	// Mock user
-	mockUser := &models.User{
-		ID:       1,
-		Nombre:   "Juan",
-		Apellido: "Perez",
-		Email:    "juan@example.com",
-		Telefono: "123456789",
-	}
-
-	mockUserRepo.On("GetByID", uint(1)).Return(mockUser, nil)
-
-	// Mock property creation
-	mockPropertyRepo.On("Create", mock.AnythingOfType("*models.Property")).Return(nil)
-
-	// Mock image creation
-	mockImageRepo.On("CreateBatch", mock.AnythingOfType("[]models.PropertyImage")).Return(nil)
-
-	// Test request
-	req := &CreatePropertyRequest{
-		UserID:           1,
-		Titulo:           "Casa bonita en centro",
+// validCreateRequestBase - Request válido base (UserID=0 usa el admin harcodeado y no requiere BD)
+func validCreateRequestBase() *CreatePropertyRequest {
+	return &CreatePropertyRequest{
+		UserID:           0,
+		Titulo:           "Casa bonita en zona centro",
 		TipoOperacion:    "venta",
 		Precio:           150000,
 		Moneda:           "USD",
-		AceptaPermuta:    false,
-		Financia:         true,
 		TipoPropiedad:    "casa",
 		Direccion:        "Av. Principal 123",
 		Zona:             "Centro",
@@ -300,285 +311,164 @@ func TestPropertyService_CreateProperty_Success(t *testing.T) {
 		MetrosTerreno:    200,
 		Estado:           "Excelente",
 		AnoConstruccion:  2020,
-		AptoOficina:      false,
-		ViviendaSocial:   false,
-		Condominio:       false,
-		CantidadPisos:    1,
 		Descripcion:      "Hermosa casa en el centro con amplios espacios",
-		TerminosCondiciones: "Términos estándar",
-		Imagenes: []CreatePropertyImageRequest{
-			{URL: "/api/imagenes/prop-1.jpg", Orden: 0},
-		},
 	}
+}
 
-	// Execute
-	property, err := service.CreateProperty(req)
+// ========== TESTS ==========
 
-	// Assert
+// TestPropertyService_CreateProperty_Success - Test creación exitosa (ruta admin harcodeado, sin BD)
+func TestPropertyService_CreateProperty_Success(t *testing.T) {
+	svc, mockPropertyRepo, _, _, _ := newServiceWithMocks()
+
+	mockPropertyRepo.On("Create", mock.AnythingOfType("*models.Property")).Return(nil).Run(func(args mock.Arguments) {
+		// Simular que GORM asigna el ID al crear
+		args.Get(0).(*models.Property).ID = 1
+	})
+
+	property, err := svc.CreateProperty(validCreateRequestBase())
+
 	assert.NoError(t, err)
 	assert.NotNil(t, property)
-	assert.Equal(t, "Casa bonita en centro", property.Titulo)
+	assert.Equal(t, "Casa bonita en zona centro", property.Titulo)
 	assert.Equal(t, 150000.0, property.Precio)
 	assert.Equal(t, "USD", property.Moneda)
 	assert.Equal(t, models.OperationType("venta"), property.TipoOperacion)
+	assert.Equal(t, models.PropertyStatusActivo, property.EstadoPropiedad, "la propiedad se publica activa (aprobación automática)")
+	assert.Equal(t, 0, property.VistasContador, "el contador de vistas inicia en 0")
+	assert.Equal(t, "Administrador Sistema", property.VendedorNombre, "se guarda el snapshot del vendedor")
+	assert.NotNil(t, property.FechaPublicacion)
 
-	// Verify mocks were called
+	mockPropertyRepo.AssertExpectations(t)
+}
+
+// TestPropertyService_CreateProperty_UserNotFound - El usuario no existe en la BD
+func TestPropertyService_CreateProperty_UserNotFound(t *testing.T) {
+	svc, _, _, mockUserRepo, _ := newServiceWithMocks()
+
+	mockUserRepo.On("GetByID", uint(77)).Return(nil, stderrors.New("record not found"))
+
+	req := validCreateRequestBase()
+	req.UserID = 77
+
+	property, err := svc.CreateProperty(req)
+
+	assert.Error(t, err)
+	assert.Nil(t, property)
+
+	appErr, ok := err.(*errors.AppError)
+	assert.True(t, ok)
+	assert.Equal(t, errors.ErrCodeUserNotFound, appErr.Code)
+
 	mockUserRepo.AssertExpectations(t)
-	mockPropertyRepo.AssertExpectations(t)
-	mockImageRepo.AssertExpectations(t)
 }
 
-// TestPropertyService_CreateProperty_ValidationError_TituloCorto - Test validación título corto
-func TestPropertyService_CreateProperty_ValidationError_TituloCorto(t *testing.T) {
-	// Setup
-	mockPropertyRepo := new(MockPropertyRepository)
-	mockImageRepo := new(MockPropertyImageRepository)
-	mockUserRepo := new(MockUserRepository)
-	mockAuditRepo := new(MockAuditRepository)
-
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
-
-	// Mock user
-	mockUser := &models.User{ID: 1, Nombre: "Juan", Apellido: "Perez"}
-	mockUserRepo.On("GetByID", uint(1)).Return(mockUser, nil)
-
-	// Test request con título muy corto
-	req := &CreatePropertyRequest{
-		UserID:        1,
-		Titulo:        "Casa", // Solo 4 caracteres
-		TipoOperacion: "venta",
-		Precio:        150000,
-		Moneda:        "USD",
-		Dormitorios:   "3",
-		Banos:         "2",
-		MetrosEdificados: 150,
-		Estado:        "Excelente",
-		Descripcion:   "Descripción válida de la propiedad",
-	}
-
-	// Execute
-	property, err := service.CreateProperty(req)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, property)
-	assert.IsType(t, &errors.AppError{}, err)
-
-	appErr := err.(*errors.AppError)
-	assert.Equal(t, errors.ErrCodeValidation, appErr.Code)
-	assert.Contains(t, appErr.Message, "titulo")
-}
-
-// TestPropertyService_CreateProperty_ValidationError_PrecioInvalido - Test validación precio inválido
-func TestPropertyService_CreateProperty_ValidationError_PrecioInvalido(t *testing.T) {
-	// Setup
-	mockPropertyRepo := new(MockPropertyRepository)
-	mockImageRepo := new(MockPropertyImageRepository)
-	mockUserRepo := new(MockUserRepository)
-	mockAuditRepo := new(MockAuditRepository)
-
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
-
-	// Mock user
-	mockUser := &models.User{ID: 1, Nombre: "Juan", Apellido: "Perez"}
-	mockUserRepo.On("GetByID", uint(1)).Return(mockUser, nil)
-
+// TestPropertyService_CreateProperty_ValidationErrors - Errores de validación del request
+func TestPropertyService_CreateProperty_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name        string
-		moneda      string
-		precio      float64
+		mutate      func(req *CreatePropertyRequest)
 		expectedErr string
 	}{
 		{
-			name:        "USD muy bajo",
-			moneda:      "USD",
-			precio:      50,
+			name:        "titulo_muy_corto",
+			mutate:      func(req *CreatePropertyRequest) { req.Titulo = "Casa" },
+			expectedErr: "titulo",
+		},
+		{
+			name:        "tipo_operacion_invalido",
+			mutate:      func(req *CreatePropertyRequest) { req.TipoOperacion = "permuta" },
+			expectedErr: "tipo_operacion",
+		},
+		{
+			name:        "moneda_invalida",
+			mutate:      func(req *CreatePropertyRequest) { req.Moneda = "EUR" },
+			expectedErr: "moneda",
+		},
+		{
+			name:        "precio_venta_usd_bajo_el_minimo",
+			mutate:      func(req *CreatePropertyRequest) { req.Precio = 50 },
 			expectedErr: "precio",
 		},
 		{
-			name:        "USD muy alto",
-			moneda:      "USD",
-			precio:      200000000,
+			name:        "precio_venta_bob_sobre_el_maximo",
+			mutate:      func(req *CreatePropertyRequest) { req.Precio = 600000000; req.Moneda = "BOB" },
 			expectedErr: "precio",
 		},
 		{
-			name:        "BOB muy bajo",
-			moneda:      "BOB",
-			precio:      500,
-			expectedErr: "precio",
+			name:        "coordenadas_fuera_de_bolivia",
+			mutate:      func(req *CreatePropertyRequest) { req.Latitud = ptrFloat(10.0); req.Longitud = ptrFloat(-63.18) },
+			expectedErr: "latitud",
 		},
 		{
-			name:        "BOB muy alto",
-			moneda:      "BOB",
-			precio:      600000000,
-			expectedErr: "precio",
+			name:        "metros_edificados_invalidos",
+			mutate:      func(req *CreatePropertyRequest) { req.MetrosEdificados = 0 },
+			expectedErr: "metros_edificados",
+		},
+		{
+			name:        "estado_vacio",
+			mutate:      func(req *CreatePropertyRequest) { req.Estado = "" },
+			expectedErr: "estado",
+		},
+		{
+			name:        "descripcion_muy_corta",
+			mutate:      func(req *CreatePropertyRequest) { req.Descripcion = "Corta" },
+			expectedErr: "descripcion",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &CreatePropertyRequest{
-				UserID:           1,
-				Titulo:           "Título válido de la propiedad",
-				TipoOperacion:    "venta",
-				Precio:           tt.precio,
-				Moneda:           tt.moneda,
-				Dormitorios:      "3",
-				Banos:            "2",
-				MetrosEdificados: 150,
-				Estado:           "Excelente",
-				Descripcion:      "Descripción válida de la propiedad",
-			}
+			svc, _, _, _, _ := newServiceWithMocks()
 
-			property, err := service.CreateProperty(req)
+			req := validCreateRequestBase()
+			tt.mutate(req)
+
+			property, err := svc.CreateProperty(req)
 
 			assert.Error(t, err)
 			assert.Nil(t, property)
-			assert.IsType(t, &errors.AppError{}, err)
 
-			appErr := err.(*errors.AppError)
+			appErr, ok := err.(*errors.AppError)
+			assert.True(t, ok)
 			assert.Equal(t, errors.ErrCodeValidation, appErr.Code)
 			assert.Contains(t, appErr.Message, tt.expectedErr)
 		})
 	}
 }
 
-// TestPropertyService_CreateProperty_ValidationError_CoordenadasInvalidas - Test validación coordenadas
-func TestPropertyService_CreateProperty_ValidationError_CoordenadasInvalidas(t *testing.T) {
-	// Setup
-	mockPropertyRepo := new(MockPropertyRepository)
-	mockImageRepo := new(MockPropertyImageRepository)
-	mockUserRepo := new(MockUserRepository)
-	mockAuditRepo := new(MockAuditRepository)
-
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
-
-	// Mock user
-	mockUser := &models.User{ID: 1, Nombre: "Juan", Apellido: "Perez"}
-	mockUserRepo.On("GetByID", uint(1)).Return(mockUser, nil)
-
-	tests := []struct {
-		name        string
-		latitud     *float64
-		longitud    *float64
-		expectedErr string
-	}{
-		{
-			name:        "Latitud fuera de rango (norte)",
-			latitud:     ptrFloat(-5),
-			longitud:    ptrFloat(-63),
-			expectedErr: "latitud",
-		},
-		{
-			name:        "Latitud fuera de rango (sur)",
-			latitud:     ptrFloat(-25),
-			longitud:    ptrFloat(-63),
-			expectedErr: "latitud",
-		},
-		{
-			name:        "Longitud fuera de rango (este)",
-			latitud:     ptrFloat(-17),
-			longitud:    ptrFloat(-50),
-			expectedErr: "longitud",
-		},
-		{
-			name:        "Longitud fuera de rango (oeste)",
-			latitud:     ptrFloat(-17),
-			longitud:    ptrFloat(-75),
-			expectedErr: "longitud",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := &CreatePropertyRequest{
-				UserID:           1,
-				Titulo:           "Título válido de la propiedad",
-				TipoOperacion:    "venta",
-				Precio:           150000,
-				Moneda:           "USD",
-				Latitud:          tt.latitud,
-				Longitud:         tt.longitud,
-				Dormitorios:      "3",
-				Banos:            "2",
-				MetrosEdificados: 150,
-				Estado:           "Excelente",
-				Descripcion:      "Descripción válida de la propiedad",
-			}
-
-			property, err := service.CreateProperty(req)
-
-			assert.Error(t, err)
-			assert.Nil(t, property)
-			assert.IsType(t, &errors.AppError{}, err)
-
-			appErr := err.(*errors.AppError)
-			assert.Equal(t, errors.ErrCodeValidation, appErr.Code)
-			assert.Contains(t, appErr.Message, tt.expectedErr)
-		})
-	}
-}
-
-// TestPropertyService_GetPropertyByID_NotFound - Test propiedad no encontrada
+// TestPropertyService_GetPropertyByID_NotFound - Propiedad inexistente
 func TestPropertyService_GetPropertyByID_NotFound(t *testing.T) {
-	// Setup
-	mockPropertyRepo := new(MockPropertyRepository)
-	mockImageRepo := new(MockPropertyImageRepository)
-	mockUserRepo := new(MockUserRepository)
-	mockAuditRepo := new(MockAuditRepository)
+	svc, mockPropertyRepo, _, _, _ := newServiceWithMocks()
 
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
+	mockPropertyRepo.On("GetByID", uint(999)).Return(nil, stderrors.New("record not found"))
 
-	// Mock repositorio retorna error (no encontrado)
-	mockPropertyRepo.On("GetByID", uint(999)).Return(nil, stderrors.New("not found"))
+	property, err := svc.GetPropertyByID(999)
 
-	// Execute
-	property, err := service.GetPropertyByID(999)
-
-	// Assert
 	assert.Error(t, err)
 	assert.Nil(t, property)
-	assert.IsType(t, &errors.AppError{}, err)
 
-	appErr := err.(*errors.AppError)
-	assert.Equal(t, errors.ErrCodeNotFound, appErr.Code)
-	assert.Contains(t, appErr.Message, "Propiedad no encontrada")
+	appErr, ok := err.(*errors.AppError)
+	assert.True(t, ok)
+	assert.Equal(t, errors.ErrCodePropertyNotFound, appErr.Code)
 
 	mockPropertyRepo.AssertExpectations(t)
 }
 
-// TestPropertyService_UpdatePropertyStatus_Success - Test actualización de estado exitosa
+// TestPropertyService_UpdatePropertyStatus_Success - Actualización de estado por el dueño
 func TestPropertyService_UpdatePropertyStatus_Success(t *testing.T) {
-	// Setup
-	mockPropertyRepo := new(MockPropertyRepository)
-	mockImageRepo := new(MockPropertyImageRepository)
-	mockUserRepo := new(MockUserRepository)
-	mockAuditRepo := new(MockAuditRepository)
+	svc, mockPropertyRepo, _, _, _ := newServiceWithMocks()
 
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
-
-	// Mock propiedad existente
-	existingProperty := &models.Property{
-		ID:             1,
-		UserID:         1,
-		Titulo:         "Casa bonita",
-		EstadoPropiedad: models.PropertyStatusActivo,
-	}
-
-	mockPropertyRepo.On("GetByID", uint(1)).Return(existingProperty, nil)
+	existing := &models.Property{ID: 1, UserID: 1, Titulo: "Casa bonita", EstadoPropiedad: models.PropertyStatusActivo}
+	mockPropertyRepo.On("GetByID", uint(1)).Return(existing, nil)
 	mockPropertyRepo.On("Update", mock.AnythingOfType("*models.Property")).Return(nil)
 
-	// Test request
-	req := &UpdatePropertyStatusRequest{
+	property, err := svc.UpdatePropertyStatus(&UpdatePropertyStatusRequest{
 		PropertyID: 1,
 		UserID:     1,
 		NewStatus:  models.PropertyStatusVendido,
-	}
+	})
 
-	// Execute
-	property, err := service.UpdatePropertyStatus(req)
-
-	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, property)
 	assert.Equal(t, models.PropertyStatusVendido, property.EstadoPropiedad)
@@ -586,78 +476,84 @@ func TestPropertyService_UpdatePropertyStatus_Success(t *testing.T) {
 	mockPropertyRepo.AssertExpectations(t)
 }
 
-// TestPropertyService_UpdatePropertyStatus_Forbidden - Test usuario no es dueño
+// TestPropertyService_UpdatePropertyStatus_Forbidden - Un usuario que no es dueño no puede modificar
 func TestPropertyService_UpdatePropertyStatus_Forbidden(t *testing.T) {
-	// Setup
-	mockPropertyRepo := new(MockPropertyRepository)
-	mockImageRepo := new(MockPropertyImageRepository)
-	mockUserRepo := new(MockUserRepository)
-	mockAuditRepo := new(MockAuditRepository)
+	svc, mockPropertyRepo, _, _, _ := newServiceWithMocks()
 
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
+	existing := &models.Property{ID: 1, UserID: 999, Titulo: "Casa de otro usuario"}
+	mockPropertyRepo.On("GetByID", uint(1)).Return(existing, nil)
 
-	// Mock propiedad de otro usuario
-	existingProperty := &models.Property{
-		ID:     1,
-		UserID: 999, // Diferente usuario
-		Titulo: "Casa bonita",
-	}
-
-	mockPropertyRepo.On("GetByID", uint(1)).Return(existingProperty, nil)
-
-	// Test request
-	req := &UpdatePropertyStatusRequest{
+	property, err := svc.UpdatePropertyStatus(&UpdatePropertyStatusRequest{
 		PropertyID: 1,
-		UserID:     1, // Usuario diferente
+		UserID:     1, // distinto del dueño (999)
 		NewStatus:  models.PropertyStatusVendido,
-	}
+	})
 
-	// Execute
-	property, err := service.UpdatePropertyStatus(req)
-
-	// Assert
 	assert.Error(t, err)
 	assert.Nil(t, property)
-	assert.IsType(t, &errors.AppError{}, err)
 
-	appErr := err.(*errors.AppError)
+	appErr, ok := err.(*errors.AppError)
+	assert.True(t, ok)
 	assert.Equal(t, errors.ErrCodeForbidden, appErr.Code)
 	assert.Contains(t, appErr.Message, "permiso")
 
 	mockPropertyRepo.AssertExpectations(t)
 }
 
-// TestPropertyService_DeleteProperty_Success - Test eliminación exitosa
-func TestPropertyService_DeleteProperty_Success(t *testing.T) {
-	// Setup
-	mockPropertyRepo := new(MockPropertyRepository)
-	mockImageRepo := new(MockPropertyImageRepository)
-	mockUserRepo := new(MockUserRepository)
-	mockAuditRepo := new(MockAuditRepository)
+// TestPropertyService_UpdatePropertyStatus_EstadoInvalido - Estado no permitido
+func TestPropertyService_UpdatePropertyStatus_EstadoInvalido(t *testing.T) {
+	svc, mockPropertyRepo, _, _, _ := newServiceWithMocks()
 
-	service := NewPropertyService(mockPropertyRepo, mockImageRepo, mockUserRepo, mockAuditRepo)
+	existing := &models.Property{ID: 1, UserID: 1, Titulo: "Casa bonita"}
+	mockPropertyRepo.On("GetByID", uint(1)).Return(existing, nil)
 
-	// Mock propiedad existente
-	existingProperty := &models.Property{
-		ID:     1,
-		UserID: 1,
-		Titulo: "Casa bonita",
-	}
-
-	mockPropertyRepo.On("GetByID", uint(1)).Return(existingProperty, nil)
-	mockPropertyRepo.On("Delete", mock.AnythingOfType("*models.Property")).Return(nil)
-
-	// Test request
-	req := &DeletePropertyRequest{
+	property, err := svc.UpdatePropertyStatus(&UpdatePropertyStatusRequest{
 		PropertyID: 1,
 		UserID:     1,
-	}
+		NewStatus:  models.PropertyStatus("pendiente"),
+	})
 
-	// Execute
-	err := service.DeleteProperty(req)
+	assert.Error(t, err)
+	assert.Nil(t, property)
 
-	// Assert
+	appErr, ok := err.(*errors.AppError)
+	assert.True(t, ok)
+	assert.Equal(t, errors.ErrCodeValidation, appErr.Code)
+
+	mockPropertyRepo.AssertExpectations(t)
+}
+
+// TestPropertyService_DeleteProperty_Success - Eliminación lógica por el dueño
+func TestPropertyService_DeleteProperty_Success(t *testing.T) {
+	svc, mockPropertyRepo, _, _, _ := newServiceWithMocks()
+
+	// UserID=0 evita el acceso a la BD para el contador de la suscripción
+	existing := &models.Property{ID: 1, UserID: 0, Titulo: "Casa bonita"}
+	mockPropertyRepo.On("GetByID", uint(1)).Return(existing, nil)
+	mockPropertyRepo.On("Delete", mock.AnythingOfType("*models.Property")).Return(nil)
+
+	err := svc.DeleteProperty(&DeletePropertyRequest{PropertyID: 1, UserID: 0})
+
 	assert.NoError(t, err)
+
+	mockPropertyRepo.AssertExpectations(t)
+}
+
+// TestPropertyService_DeleteProperty_Forbidden - Un usuario que no es dueño no puede eliminar
+func TestPropertyService_DeleteProperty_Forbidden(t *testing.T) {
+	svc, mockPropertyRepo, _, _, _ := newServiceWithMocks()
+
+	existing := &models.Property{ID: 1, UserID: 999, Titulo: "Casa de otro usuario"}
+	mockPropertyRepo.On("GetByID", uint(1)).Return(existing, nil)
+
+	err := svc.DeleteProperty(&DeletePropertyRequest{PropertyID: 1, UserID: 1})
+
+	assert.Error(t, err)
+
+	appErr, ok := err.(*errors.AppError)
+	assert.True(t, ok)
+	assert.Equal(t, errors.ErrCodeForbidden, appErr.Code)
+	assert.Contains(t, appErr.Message, "permiso")
 
 	mockPropertyRepo.AssertExpectations(t)
 }

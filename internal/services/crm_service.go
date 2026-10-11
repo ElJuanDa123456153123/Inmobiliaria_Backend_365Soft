@@ -34,15 +34,17 @@ func NewCrmService(
 
 // CreateClientRequest - Request para crear un cliente
 type CreateClientRequest struct {
-	AdvisorID  uint                    `json:"advisor_id"`
-	Nombre     string                  `json:"nombre"`
-	Telefono   string                  `json:"telefono"`
-	WhatsApp   string                  `json:"whatsapp,omitempty"`
-	Email      string                  `json:"email,omitempty"`
-	Estado     models.ClientStatus     `json:"estado"`
-	Origen     models.ClientOrigin     `json:"origen"`
-	PropertyID *uint                   `json:"property_id,omitempty"`
-	Notas      string                  `json:"notas,omitempty"`
+	AdvisorID     uint                `json:"advisor_id"`
+	Nombre        string              `json:"nombre"`
+	Telefono      string              `json:"telefono"`
+	WhatsApp      string              `json:"whatsapp,omitempty"`
+	Email         string              `json:"email,omitempty"`
+	Estado        models.ClientStatus `json:"estado"`
+	Origen        models.ClientOrigin `json:"origen"`
+	PropertyID    *uint               `json:"property_id,omitempty"`
+	Notas         string              `json:"notas,omitempty"`
+	Presupuesto   *float64            `json:"presupuesto,omitempty"`
+	ZonaPreferida string              `json:"zona_preferida,omitempty"`
 }
 
 // CreateClient - Crea un nuevo cliente
@@ -54,16 +56,21 @@ func (s *CrmService) CreateClient(req *CreateClientRequest) (*models.Client, err
 
 	// Crear cliente
 	client := &models.Client{
-		Nombre:     req.Nombre,
-		Telefono:   req.Telefono,
-		WhatsApp:   req.WhatsApp,
-		Email:      req.Email,
-		Estado:     req.Estado,
-		Origen:     req.Origen,
-		PropertyID: req.PropertyID,
-		Notas:      req.Notas,
-		AdvisorID:  req.AdvisorID,
+		Nombre:        req.Nombre,
+		Telefono:      req.Telefono,
+		WhatsApp:      req.WhatsApp,
+		Email:         req.Email,
+		Estado:        req.Estado,
+		Origen:        req.Origen,
+		PropertyID:    req.PropertyID,
+		Notas:         req.Notas,
+		AdvisorID:     req.AdvisorID,
+		Presupuesto:   req.Presupuesto,
+		ZonaPreferida: req.ZonaPreferida,
 	}
+
+	// Auto-vincular con usuario de la plataforma si coincide email/teléfono
+	s.linkClientToUser(client)
 
 	if err := s.ClientRepo.Create(client); err != nil {
 		return nil, errors.DatabaseError(err)
@@ -71,6 +78,53 @@ func (s *CrmService) CreateClient(req *CreateClientRequest) (*models.Client, err
 
 	fmt.Printf("✅ Cliente creado: %s (ID: %d)\n", client.Nombre, client.ID)
 	return client, nil
+}
+
+// linkClientToUser - Intenta vincular el cliente con un usuario registrado de la
+// plataforma por coincidencia de email o teléfono (últimos 8 dígitos).
+// Permite que el lead scoring use la actividad real (vistas, favoritos, búsquedas).
+func (s *CrmService) linkClientToUser(client *models.Client) {
+	if client.UserID != nil {
+		return // ya vinculado
+	}
+
+	// 1. Por email
+	if client.Email != "" {
+		var user models.User
+		if err := s.db.Where("email = ? AND deleted_at IS NULL", client.Email).First(&user).Error; err == nil {
+			client.UserID = &user.ID
+			fmt.Printf("🔗 Cliente vinculado a usuario %d por email\n", user.ID)
+			return
+		}
+	}
+
+	// 2. Por teléfono (comparando últimos 8 dígitos, ignorando formato)
+	phoneDigits := normalizePhone(client.Telefono)
+	if phoneDigits == "" {
+		phoneDigits = normalizePhone(client.WhatsApp)
+	}
+	if len(phoneDigits) >= 8 {
+		suffix := phoneDigits[len(phoneDigits)-8:]
+		var user models.User
+		if err := s.db.Where(
+			"RIGHT(REGEXP_REPLACE(telefono, '[^0-9]', '', 'g'), 8) = ? AND deleted_at IS NULL",
+			suffix,
+		).First(&user).Error; err == nil {
+			client.UserID = &user.ID
+			fmt.Printf("🔗 Cliente vinculado a usuario %d por teléfono\n", user.ID)
+		}
+	}
+}
+
+// normalizePhone - Deja solo dígitos del teléfono
+func normalizePhone(phone string) string {
+	digits := make([]rune, 0, len(phone))
+	for _, r := range phone {
+		if r >= '0' && r <= '9' {
+			digits = append(digits, r)
+		}
+	}
+	return string(digits)
 }
 
 // GetClientByID - Obtiene un cliente por ID
@@ -87,14 +141,16 @@ func (s *CrmService) GetClientByID(clientID uint) (*models.Client, error) {
 
 // UpdateClientRequest - Request para actualizar un cliente
 type UpdateClientRequest struct {
-	ClientID          uint                    `json:"client_id"`
-	Nombre            *string                 `json:"nombre,omitempty"`
-	Telefono          *string                 `json:"telefono,omitempty"`
-	WhatsApp          *string                 `json:"whatsapp,omitempty"`
-	Email             *string                 `json:"email,omitempty"`
-	Estado            *models.ClientStatus   `json:"estado,omitempty"`
-	Notas             *string                 `json:"notas,omitempty"`
-	ProximoContacto   *time.Time              `json:"proximo_contacto,omitempty"`
+	ClientID        uint                  `json:"client_id"`
+	Nombre          *string               `json:"nombre,omitempty"`
+	Telefono        *string               `json:"telefono,omitempty"`
+	WhatsApp        *string               `json:"whatsapp,omitempty"`
+	Email           *string               `json:"email,omitempty"`
+	Estado          *models.ClientStatus  `json:"estado,omitempty"`
+	Notas           *string               `json:"notas,omitempty"`
+	ProximoContacto *time.Time            `json:"proximo_contacto,omitempty"`
+	Presupuesto     *float64              `json:"presupuesto,omitempty"`
+	ZonaPreferida   *string               `json:"zona_preferida,omitempty"`
 }
 
 // UpdateClient - Actualiza un cliente
@@ -130,6 +186,15 @@ func (s *CrmService) UpdateClient(req *UpdateClientRequest) (*models.Client, err
 	if req.ProximoContacto != nil {
 		client.ProximoContacto = req.ProximoContacto
 	}
+	if req.Presupuesto != nil {
+		client.Presupuesto = req.Presupuesto
+	}
+	if req.ZonaPreferida != nil {
+		client.ZonaPreferida = *req.ZonaPreferida
+	}
+
+	// Reintentar vinculación si cambiaron email o teléfono
+	s.linkClientToUser(client)
 
 	// Guardar cambios
 	if err := s.ClientRepo.Update(client); err != nil {

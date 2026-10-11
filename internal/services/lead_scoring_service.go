@@ -55,14 +55,15 @@ type LeadScoreData struct {
 // CalculateLeadScore - Calcula el score de un lead basándose en múltiples factores
 //
 // Algoritmo de scoring (0-100 puntos):
-// 1. Presupuesto definido (+20 puntos)
-// 2. Zona específica (+15 puntos)
+// 1. Presupuesto real capturado (+20 puntos)
+// 2. Zona preferida real capturada (+15 puntos)
 // 3. Interacciones en última semana (+20 puntos max, 5pts c/u)
-// 4. Visto propiedades (+10 puntos)
-// 5. Favoritos marcados (+10 puntos)
+// 4. Visto propiedades (+10 puntos) — requiere cliente vinculado a usuario
+// 5. Favoritos marcados (+10 puntos) — requiere cliente vinculado a usuario
 // 6. Propiedad específica de interés (+10 puntos)
 // 7. Origen del lead (Referencia=+10, Web/WhatsApp=+5)
-// 8. Estado del pipeline (Interesado+=+10, Contactado+=+5)
+// 8. Estado del pipeline (Interesado+=+10, Contactado+=+5, EnNegociacion+=+15)
+// 9. Decaimiento por inactividad (-5 pts c/7 días sin interacción)
 func (s *LeadScoringService) CalculateLeadScore(clientID uint) (*LeadScoreData, error) {
 	// Obtener cliente con interacciones
 	client, err := s.ClientRepo.GetWithInteractions(clientID)
@@ -77,18 +78,14 @@ func (s *LeadScoringService) CalculateLeadScore(clientID uint) (*LeadScoreData, 
 		Score: 0,
 	}
 
-	// 1. Presupuesto definido (+20 puntos)
-	// NOTA: En una implementación completa, esto vendría de un campo de presupuesto
-	// Por ahora, lo inferimos de si tiene una PropertyID específica
-	scoreData.HasSpecificProperty = client.PropertyID != nil
-	if scoreData.HasSpecificProperty {
-		scoreData.Score += 10
+	// 1. Presupuesto real capturado (+20 puntos)
+	scoreData.HasBudget = client.Presupuesto != nil && *client.Presupuesto > 0
+	if scoreData.HasBudget {
+		scoreData.Score += 20
 	}
 
-	// 2. Zona específica (+15 puntos)
-	// NOTA: En una implementación completa, esto vendría de un campo de zona_preferida
-	// Por ahora, lo inferimos de si tiene una PropertyID asociada
-	scoreData.HasZone = client.PropertyID != nil
+	// 2. Zona preferida real capturada (+15 puntos)
+	scoreData.HasZone = client.ZonaPreferida != ""
 	if scoreData.HasZone {
 		scoreData.Score += 15
 	}
@@ -117,19 +114,32 @@ func (s *LeadScoringService) CalculateLeadScore(clientID uint) (*LeadScoreData, 
 		}
 	}
 
-	// 5. Visto propiedades (+10 puntos)
-	// NOTA: Esto requiere userID, no clientID
-	// Por ahora, lo seteamos en false
+	// 5 y 6. Actividad real en la plataforma (requiere cliente vinculado a usuario)
+	// Visto propiedades (+10) y Favoritos marcados (+10)
 	scoreData.HasViewedProperties = false
-	// TODO: Implementar cuando se tenga relación Client <-> User
-
-	// 6. Favoritos marcados (+10 puntos)
-	// NOTA: Esto requiere userID, no clientID
-	// Por ahora, lo seteamos en false
 	scoreData.HasFavorites = false
-	// TODO: Implementar cuando se tenga relación Client <-> User
+	if client.UserID != nil {
+		var viewedCount, favCount int64
+		s.db.Model(&models.ViewHistory{}).Where("user_id = ?", *client.UserID).Count(&viewedCount)
+		s.db.Model(&models.Favorite{}).Where("user_id = ?", *client.UserID).Count(&favCount)
 
-	// 7. Origen del lead (Referencia=+10, Web/WhatsApp=+5)
+		if viewedCount > 0 {
+			scoreData.HasViewedProperties = true
+			scoreData.Score += 10
+		}
+		if favCount > 0 {
+			scoreData.HasFavorites = true
+			scoreData.Score += 10
+		}
+	}
+
+	// 7. Propiedad específica de interés (+10 puntos)
+	scoreData.HasSpecificProperty = client.PropertyID != nil
+	if scoreData.HasSpecificProperty {
+		scoreData.Score += 10
+	}
+
+	// 8. Origen del lead (Referencia=+10, Web/WhatsApp=+5)
 	switch client.Origen {
 	case models.ClientOriginReferencia:
 		scoreData.OriginBonus = 10

@@ -15,6 +15,14 @@ const (
 	ContractStatusTerminado ContractStatus = "terminado"  // Contrato terminado anticipadamente
 )
 
+// ContractType - Tipos de contrato
+type ContractType string
+
+const (
+	ContractTypeAlquiler    ContractType = "alquiler"     // Alquiler mensual con cuotas
+	ContractTypeAnticretico ContractType = "anticretico"  // Anticrético (sin cuotas mensuales)
+)
+
 // RentalContract - Modelo de contratos de alquiler
 type RentalContract struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
@@ -40,6 +48,12 @@ type RentalContract struct {
 
 	// Monto mensual de alquiler
 	MontoMensual float64 `gorm:"type:decimal(15,2);not null" json:"monto_mensual"`
+
+	// Tipo de contrato (alquiler mensual o anticrético)
+	TipoContrato ContractType `gorm:"size:20;not null;default:'alquiler'" json:"tipo_contrato"`
+
+	// Depósito de garantía en efectivo (0 = sin depósito). Se cobra aparte de la primera cuota
+	MontoDeposito float64 `gorm:"type:decimal(15,2);default:0" json:"monto_deposito"`
 
 	// Estado del contrato
 	Estado ContractStatus `gorm:"size:20;not null;default:'activo'" json:"estado"`
