@@ -10,7 +10,8 @@ import (
 type VisitStatus string
 
 const (
-	VisitStatusPendiente   VisitStatus = "pendiente"   // Visita agendada
+	VisitStatusPendiente   VisitStatus = "pendiente"   // Propuesta del cliente, esperando respuesta del vendedor
+	VisitStatusConfirmada  VisitStatus = "confirmada"  // Fecha acordada por vendedor y cliente
 	VisitStatusCompletada  VisitStatus = "completada"  // Visita realizada
 	VisitStatusCancelada   VisitStatus = "cancelada"   // Visita cancelada
 )

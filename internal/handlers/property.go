@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/pkg/errors"
 	"github.com/gofiber/fiber/v2"
 	"github.com/microcosm-cc/bluemonday"
+	"gorm.io/datatypes"
 )
 
 // PropertyHandler - Handler para propiedades
@@ -267,6 +269,14 @@ func (h *PropertyHandler) GetProperty(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "Propiedad no encontrada",
 		})
+	}
+
+	// Disponibilidad de visitas ACTUAL del vendedor (tarjeta de contacto)
+	if dbConfig, dbErr := config.GetDatabase(); dbErr == nil {
+		var vendedor models.User
+		if err := dbConfig.DB.Select("horario_visitas").First(&vendedor, property.UserID).Error; err == nil && len(vendedor.HorarioVisitas) > 0 {
+			property.VendedorDisponibilidad = vendedor.HorarioVisitas
+		}
 	}
 
 	// Incrementar contador de vistas
@@ -694,6 +704,145 @@ func (h *PropertyHandler) UpdatePropertyStatus(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"message":  "Estado actualizado exitosamente",
+		"property": property,
+	})
+}
+
+// UpdatePropertyOwner - Actualiza una propiedad existente (solo el dueño)
+func (h *PropertyHandler) UpdatePropertyOwner(c *fiber.Ctx) error {
+	// Obtener usuario del contexto
+	user := c.Locals("user").(*models.User)
+
+	// Obtener ID de la propiedad
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "ID de propiedad inválido",
+		})
+	}
+
+	// Parsear request body (mismo formato que la creación)
+	var req CreatePropertyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	// 🔒 Sanitización HTML para prevenir XSS
+	policy := bluemonday.UGCPolicy()
+	policy.AllowElements("a", "b", "strong", "em", "i", "u", "ul", "ol", "li", "p", "br", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "span", "div")
+	policy.AllowAttrs("href").OnElements("a")
+	policy.AllowAttrs("class").OnElements("span", "div", "p")
+	policy.AllowAttrs("target").OnElements("a")
+	policy.RequireNoFollowOnLinks(true)
+
+	// Serializar arrays JSON
+	var confortJSON, seguridadJSON, serviciosJSON datatypes.JSON
+	if req.Confort != nil {
+		b, _ := json.Marshal(req.Confort)
+		confortJSON = datatypes.JSON(b)
+	}
+	if req.Seguridad != nil {
+		b, _ := json.Marshal(req.Seguridad)
+		seguridadJSON = datatypes.JSON(b)
+	}
+	if req.ServiciosIncluidos != nil {
+		b, _ := json.Marshal(req.ServiciosIncluidos)
+		serviciosJSON = datatypes.JSON(b)
+	}
+
+	updates := map[string]interface{}{
+		"titulo":                req.Titulo,
+		"tipo_operacion":        req.TipoOperacion,
+		"precio":                req.Precio,
+		"moneda":                req.Moneda,
+		"acepta_permuta":        req.AceptaPermuta,
+		"financia":              req.Financia,
+		"deposito":              req.Deposito,
+		"plazo_minimo":          req.PlazoMinimo,
+		"servicios_incluidos":   serviciosJSON,
+		"duracion_contrato":     req.DuracionContrato,
+		"opcion_compra":         req.OpcionCompra,
+		"tipo_propiedad":        req.TipoPropiedad,
+		"direccion":             req.Direccion,
+		"zona":                  req.Zona,
+		"tipo_marcador":         req.TipoMarcador,
+		"latitud":               req.Latitud,
+		"longitud":              req.Longitud,
+		"mostrar_direccion":     req.MostrarDireccion,
+		"dormitorios":           req.Dormitorios,
+		"banos":                 req.Banos,
+		"garaje":                req.Garaje,
+		"metros_edificados":     req.MetrosEdificados,
+		"metros_terreno":        req.MetrosTerreno,
+		"estado":                req.Estado,
+		"ano_construccion":      req.AnoConstruccion,
+		"apto_oficina":          req.AptoOficina,
+		"vivienda_social":       req.ViviendaSocial,
+		"condominio":            req.Condominio,
+		"cantidad_pisos":        req.CantidadPisos,
+		"confort":               confortJSON,
+		"seguridad":             seguridadJSON,
+		"no_aplica_confort":     req.NoAplicaConfort,
+		"video_url":             req.VideoURL,
+		"descripcion":           policy.Sanitize(strings.TrimSpace(req.Descripcion)),
+		"terminos_condiciones":  policy.Sanitize(strings.TrimSpace(req.TerminosCondiciones)),
+	}
+
+	// Actualizar a través del servicio (valida ownership internamente)
+	property, err := h.PropertyService.UpdatePropertyAsOwner(uint(id), user.ID, updates)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			if appErr.Code == errors.ErrCodeForbidden {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"error": appErr.Message,
+				})
+			}
+			return c.Status(appErr.HTTPStatus).JSON(fiber.Map{
+				"error": appErr.Message,
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error actualizando la propiedad",
+		})
+	}
+
+	// Reemplazar imágenes si el payload las incluye (el formulario siempre las envía completas)
+	if req.Imagenes != nil {
+		imagenes := make([]service.CreatePropertyImageRequest, len(req.Imagenes))
+		for i, img := range req.Imagenes {
+			imagenes[i] = service.CreatePropertyImageRequest{
+				URL:   img.URL,
+				Orden: img.Orden,
+			}
+		}
+		if err := h.PropertyService.ReplacePropertyImages(property.ID, imagenes); err != nil {
+			fmt.Printf("⚠️  Error reemplazando imágenes de propiedad %d: %v\n", property.ID, err)
+		}
+	}
+
+	// 🔒 Auditoría: Log de actualización
+	h.LogAudit(c, "owner_update_property", "property", &property.ID, &user.ID, map[string]interface{}{
+		"titulo": property.Titulo,
+		"precio": property.Precio,
+		"moneda": property.Moneda,
+	})
+
+	// 🚀 Redis: Invalidar caché y publicar actualización
+	if h.Redis != nil {
+		h.Redis.InvalidateProperty(property.ID)
+		h.Redis.InvalidatePropertyLists()
+		h.Redis.PublishPropertyUpdate("updated", property.ID, map[string]interface{}{
+			"id":     property.ID,
+			"titulo": property.Titulo,
+			"precio": property.Precio,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message":  "Propiedad actualizada exitosamente",
 		"property": property,
 	})
 }

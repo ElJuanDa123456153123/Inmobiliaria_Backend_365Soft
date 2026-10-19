@@ -315,6 +315,8 @@ func main() {
 	// Rutas protegidas de autenticación (aplicamos middleware individualmente)
 	api.Get("/auth/me", middleware.AuthMiddleware(), authHandler.GetMe)
 	api.Put("/auth/profile", middleware.AuthMiddleware(), authHandler.UpdateProfile) // Actualizar perfil
+	api.Put("/auth/qr-pago", middleware.AuthMiddleware(), authHandler.UpdateQrPago) // QR de cobros del usuario
+	api.Put("/auth/qrs-cobro", middleware.AuthMiddleware(), authHandler.UpdateQrsCobro) // Múltiples QR por plataforma
 	api.Put("/auth/datos-publicos", middleware.AuthMiddleware(), authHandler.UpdateDatosPublicos) // Actualizar datos públicos
 
 	// Ruta de completar perfil de Google (protegida - requiere token)
@@ -486,6 +488,7 @@ func main() {
 
 		// Rutas ESPECÍFICAS (protegidas) - van primero
 		api.Get("/properties/my", middleware.AuthMiddleware(), propertyHandler.GetUserProperties)         // Mis propiedades (requiere login)
+		api.Put("/properties/:id", middleware.AuthMiddleware(), propertyHandler.UpdatePropertyOwner)     // Editar propiedad (solo dueño)
 		api.Patch("/properties/:id/status", middleware.AuthMiddleware(), propertyHandler.UpdatePropertyStatus) // Actualizar estado (requiere login)
 
 		// Rutas PÚBLICAS (van después)
@@ -651,10 +654,13 @@ func main() {
 		// Visitas
 		panel.Get("/visits/my", visitHandler.GetMyVisits)
 		panel.Get("/visits/received", visitHandler.GetReceivedVisits)
+		panel.Get("/visits/availability/:propertyId", visitHandler.GetVisitAvailability)
 		panel.Get("/properties/:id/visits", visitHandler.GetPropertyVisits)
 		panel.Post("/visits", visitHandler.ScheduleVisit)
 		panel.Patch("/visits/:id", visitHandler.UpdateVisitStatus)
 		panel.Patch("/visits/:id/confirm", visitHandler.ConfirmVisit)
+		panel.Patch("/visits/:id/reprogram", visitHandler.ReprogramarVisit)
+		panel.Put("/visit-availability", visitHandler.UpdateVisitAvailability)
 
 		// Solicitudes de alquiler (propietario) e inquilinos
 		if rentalRequestHandler != nil {

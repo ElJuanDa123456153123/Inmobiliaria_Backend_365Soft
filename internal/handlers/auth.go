@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/365Soft-Bolivia/inmobiliaria-backend/internal/config"
@@ -11,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -326,6 +329,7 @@ type UpdateProfileRequest struct {
 	Direccion        string     `json:"direccion,omitempty"`
 	CI               string     `json:"ci,omitempty"`
 	AvatarURL        string     `json:"avatar_url,omitempty"`
+	QrPagoURL        string     `json:"qr_pago_url,omitempty"`
 	NuevaPassword    string     `json:"nueva_password,omitempty"`
 }
 
@@ -377,6 +381,10 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	user.Direccion = req.Direccion
 	user.CI = req.CI
 	user.AvatarURL = req.AvatarURL
+	// El QR solo se sobrescribe si viene en el request (no se pierde al editar el perfil)
+	if req.QrPagoURL != "" {
+		user.QrPagoURL = req.QrPagoURL
+	}
 
 	// Si se proporciona nueva contraseña, hashearla
 	if req.NuevaPassword != "" {
@@ -404,6 +412,99 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"message": "Perfil actualizado exitosamente",
 		"user":    user,
+	})
+}
+
+// UpdateQrPagoRequest - Body para guardar/quitar el QR de cobros
+type UpdateQrPagoRequest struct {
+	QrPagoURL string `json:"qr_pago_url"`
+}
+
+// UpdateQrPago - Guarda (o elimina con "") el QR de cobros del usuario
+// PUT /api/auth/qr-pago
+func (h *AuthHandler) UpdateQrPago(c *fiber.Ctx) error {
+	user := c.Locals("user").(*models.User)
+
+	var req UpdateQrPagoRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	user.QrPagoURL = strings.TrimSpace(req.QrPagoURL)
+	if err := h.DB.DB.Model(&models.User{}).Where("id = ?", user.ID).
+		Update("qr_pago_url", user.QrPagoURL).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error guardando el QR",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message":     "QR de cobros actualizado",
+		"qr_pago_url": user.QrPagoURL,
+	})
+}
+
+// QrItem - Un QR de cobro con su plataforma
+type QrItem struct {
+	Plataforma string `json:"plataforma"`
+	URL        string `json:"url"`
+}
+
+// UpdateQrsCobroRequest - Lista de QRs del vendedor (por plataforma)
+type UpdateQrsCobroRequest struct {
+	Qrs []QrItem `json:"qrs"`
+}
+
+// UpdateQrsCobro - Guarda la lista de QRs de cobro (máx. 5, por plataforma)
+// PUT /api/auth/qrs-cobro
+func (h *AuthHandler) UpdateQrsCobro(c *fiber.Ctx) error {
+	user := c.Locals("user").(*models.User)
+
+	var req UpdateQrsCobroRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Error parseando request",
+		})
+	}
+
+	if len(req.Qrs) > 5 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Máximo 5 QR de cobro",
+		})
+	}
+
+	limpios := make([]QrItem, 0, len(req.Qrs))
+	for _, q := range req.Qrs {
+		q.Plataforma = strings.TrimSpace(q.Plataforma)
+		q.URL = strings.TrimSpace(q.URL)
+		if q.URL == "" {
+			continue
+		}
+		if q.Plataforma == "" {
+			q.Plataforma = "QR"
+		}
+		limpios = append(limpios, q)
+	}
+
+	bytes, err := json.Marshal(limpios)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error procesando los QR",
+		})
+	}
+
+	if err := h.DB.DB.Model(&models.User{}).Where("id = ?", user.ID).
+		Update("qrs_cobro", datatypes.JSON(bytes)).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error guardando los QR",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message":   "QRs de cobro actualizados",
+		"qrs_cobro": limpios,
 	})
 }
 

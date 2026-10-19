@@ -324,7 +324,7 @@ func (h *RentPaymentHandler) GetPaymentHistory(c *fiber.Ctx) error {
 
 	// Obtener pagos
 	var payments []models.RentPayment
-	if err := query.Preload("Contract").Preload("Contract.Property").Preload("Inquilino").Preload("Vendedor").
+	if err := query.Preload("Contract").Preload("Contract.Property").Preload("Contract.Vendedor").Preload("Inquilino").Preload("Vendedor").
 		Order("anio DESC, mes_correspondiente DESC").
 		Find(&payments).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

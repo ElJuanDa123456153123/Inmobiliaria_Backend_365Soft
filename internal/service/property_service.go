@@ -754,12 +754,85 @@ func (s *PropertyService) UpdateProperty(id uint, updates map[string]interface{}
 		property.AgenciaNombrePersonalizado = agenciaNombrePersonalizado
 	}
 
+	// Campos específicos de alquiler
+	if deposito, ok := updates["deposito"].(string); ok {
+		property.Deposito = deposito
+	}
+	if plazoMinimo, ok := updates["plazo_minimo"].(string); ok {
+		property.PlazoMinimo = plazoMinimo
+	}
+	if serviciosIncluidos, ok := updates["servicios_incluidos"].([]string); ok {
+		bytes, _ := json.Marshal(serviciosIncluidos)
+		property.ServiciosIncluidos = datatypes.JSON(bytes)
+	}
+	if serviciosJSON, ok := updates["servicios_incluidos"].(datatypes.JSON); ok {
+		property.ServiciosIncluidos = serviciosJSON
+	}
+
+	// Campos específicos de anticrético
+	if duracionContrato, ok := updates["duracion_contrato"].(string); ok {
+		property.DuracionContrato = duracionContrato
+	}
+	if opcionCompra, ok := updates["opcion_compra"].(bool); ok {
+		property.OpcionCompra = opcionCompra
+	}
+
+	// Confort y seguridad
+	if confort, ok := updates["confort"].([]string); ok {
+		bytes, _ := json.Marshal(confort)
+		property.Confort = datatypes.JSON(bytes)
+	}
+	if confortJSON, ok := updates["confort"].(datatypes.JSON); ok {
+		property.Confort = confortJSON
+	}
+	if seguridad, ok := updates["seguridad"].([]string); ok {
+		bytes, _ := json.Marshal(seguridad)
+		property.Seguridad = datatypes.JSON(bytes)
+	}
+	if seguridadJSON, ok := updates["seguridad"].(datatypes.JSON); ok {
+		property.Seguridad = seguridadJSON
+	}
+
 	// Guardar cambios
 	if err := s.PropertyRepo.Update(property); err != nil {
 		return nil, errors.DatabaseError(err)
 	}
 
 	return property, nil
+}
+
+// UpdatePropertyAsOwner - Actualiza una propiedad verificando que pertenezca al usuario
+func (s *PropertyService) UpdatePropertyAsOwner(propertyID, userID uint, updates map[string]interface{}) (*models.Property, error) {
+	property, err := s.PropertyRepo.GetByID(propertyID)
+	if err != nil {
+		return nil, errors.PropertyNotFound(propertyID)
+	}
+	if property.UserID != userID {
+		return nil, errors.Forbidden("No tienes permiso para editar esta propiedad")
+	}
+	return s.UpdateProperty(propertyID, updates)
+}
+
+// ReplacePropertyImages - Reemplaza todas las imágenes de una propiedad
+func (s *PropertyService) ReplacePropertyImages(propertyID uint, images []CreatePropertyImageRequest) error {
+	if err := s.ImageRepo.DeleteByPropertyID(propertyID); err != nil {
+		return errors.DatabaseError(err)
+	}
+	if len(images) > 0 {
+		imgs := make([]models.PropertyImage, len(images))
+		for i, img := range images {
+			imgs[i] = models.PropertyImage{
+				PropertyID: propertyID,
+				ImageURL:   img.URL,
+				Orden:      img.Orden,
+				Principal:  img.Orden == 0,
+			}
+		}
+		if err := s.ImageRepo.CreateBatch(imgs); err != nil {
+			return errors.DatabaseError(err)
+		}
+	}
+	return nil
 }
 
 // UpdatePropertyStatusAdmin - Actualiza el estado de una propiedad (para admin, sin verificar usuario)

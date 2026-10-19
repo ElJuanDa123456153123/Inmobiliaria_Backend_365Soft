@@ -463,6 +463,11 @@ func (h *ContractHandler) GeneratePDF(c *fiber.Ctx) error {
 
 	filename := fmt.Sprintf("contrato-%d.pdf", contract.ID)
 	c.Set("Content-Type", "application/pdf")
-	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	// Por defecto se muestra inline (visor del navegador); con ?download=1 se descarga
+	if c.Query("download") == "1" {
+		c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	} else {
+		c.Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+	}
 	return c.Send(pdfBytes)
 }

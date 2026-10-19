@@ -126,6 +126,9 @@ type Property struct {
 	VendedorTelefono   string `gorm:"size:30" json:"vendedor_telefono,omitempty"`
 	VendedorContacto   string `gorm:"size:100" json:"vendedor_contacto,omitempty"`
 	VendedorHorario    string `gorm:"size:100" json:"vendedor_horario,omitempty"`
+	// Disponibilidad de visitas actual del vendedor (no persistida: se calcula
+	// al servir desde users.horario_visitas). Formato: {duracion_min, horarios}
+	VendedorDisponibilidad datatypes.JSON `gorm:"-" json:"vendedor_disponibilidad,omitempty"`
 	MostrarVendedor    bool   `gorm:"default:false" json:"mostrar_vendedor"` // Por defecto false (muestra 365Soft), true muestra vendedor real
 	MostrarAgencia     bool   `gorm:"default:false" json:"mostrar_agencia"` // Controla si se muestra el nombre de la agencia independientemente
 	AgenciaNombrePersonalizado string `gorm:"size:150" json:"agencia_nombre_personalizado,omitempty"` // Nombre personalizado para la agencia (opcional)

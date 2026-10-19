@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/datatypes"
 )
 
 // UserRole - Roles de usuario en el sistema
@@ -55,6 +56,15 @@ type User struct {
 
 	// Avatar (URL)
 	AvatarURL string `gorm:"size:500" json:"avatar_url"`
+
+	// QR de cobros (URL de imagen) — los inquilinos lo escanean para pagar rentas
+	QrPagoURL string `gorm:"size:500" json:"qr_pago_url,omitempty"`
+
+	// Múltiples QR de cobro por plataforma: [{"plataforma":"Yape","url":"..."}, ...]
+	QrsCobro datatypes.JSON `gorm:"type:jsonb" json:"qrs_cobro,omitempty"`
+
+	// Disponibilidad para visitas (JSON: dias, rangos, duracion_min). Null = default Lun-Sáb 9-12/14-18
+	HorarioVisitas datatypes.JSON `gorm:"type:jsonb" json:"horario_visitas,omitempty"`
 }
 
 // TableName - Especifica el nombre de la tabla en PostgreSQL

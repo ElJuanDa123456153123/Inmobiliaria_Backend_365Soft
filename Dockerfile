@@ -28,6 +28,9 @@ WORKDIR /app
 # Copiar el binario desde el builder
 COPY --from=builder /app/main .
 
+# Copiar fuentes UTF-8 para los PDFs de contratos
+COPY --from=builder /app/internal/handlers/fonts ./fonts
+
 # Copiar archivos de configuración
 COPY .env.example ./
 

@@ -141,6 +141,7 @@ func buildTestApp() error {
 	panel.Post("/visits", visitHandler.ScheduleVisit)
 	panel.Patch("/visits/:id", visitHandler.UpdateVisitStatus)
 	panel.Patch("/visits/:id/confirm", visitHandler.ConfirmVisit)
+	panel.Patch("/visits/:id/reprogram", visitHandler.ReprogramarVisit)
 
 	// Módulo de alquiler/anticrético: contratos, cuotas y solicitudes
 	contracts := testApp.Group("/api/contracts", middleware.AuthMiddleware())

@@ -309,10 +309,10 @@ func TestI24_ConfirmarVisitaPorVendedor(t *testing.T) {
 	assert.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "Visita confirmada correctamente", result["message"])
 
-	// BD: estado completada con fecha asignada
+	// BD: estado confirmada con fecha asignada
 	var visitaDB models.Visit
 	testDB.DB.First(&visitaDB, visita.ID)
-	assert.Equal(t, models.VisitStatusCompletada, visitaDB.Estado)
+	assert.Equal(t, models.VisitStatusConfirmada, visitaDB.Estado)
 	fechaEsperada, _ := time.Parse("2006-01-02 15:04", "2026-09-15 15:00")
 	assert.WithinDuration(t, fechaEsperada, visitaDB.FechaVisita, time.Second)
 
