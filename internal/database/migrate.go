@@ -44,6 +44,7 @@ func AutoMigrate() error {
 		&models.RentalContract{},   // 📜 Contratos de alquiler
 		&models.RentPayment{},      // 💰 Pagos de alquiler
 		&models.RentalRequest{},    // 📨 Solicitudes de alquiler
+		&models.Habitacion{},       // 🛏️ Habitaciones (alquiler por habitaciones)
 	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)

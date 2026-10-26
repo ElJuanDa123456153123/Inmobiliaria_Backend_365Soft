@@ -112,6 +112,15 @@ type CreatePropertyRequest struct {
 	// === DESCRIPCIÓN (PASO 6) ===
 	Descripcion         string `json:"descripcion"`
 	TerminosCondiciones string `json:"terminos_condiciones"`
+
+	// === ALQUILER POR HABITACIONES ===
+	AlquilaPorHabitaciones bool   `json:"alquila_por_habitaciones"`
+	Habitaciones           []struct {
+		Nombre      string   `json:"nombre"`
+		Descripcion string   `json:"descripcion"`
+		Precio      *float64 `json:"precio"`
+		Activa      bool     `json:"activa"`
+	} `json:"habitaciones"`
 }
 
 // CreateProperty - Crea una nueva propiedad
@@ -157,6 +166,9 @@ func (h *PropertyHandler) CreateProperty(c *fiber.Ctx) error {
 		Deposito:           req.Deposito,
 		PlazoMinimo:        req.PlazoMinimo,
 		ServiciosIncluidos: req.ServiciosIncluidos,
+		// Alquiler por habitaciones
+		AlquilaPorHabitaciones: req.AlquilaPorHabitaciones,
+		Habitaciones:           make([]service.HabitacionInput, 0, len(req.Habitaciones)),
 		// Campos específicos para anticrético
 		DuracionContrato: req.DuracionContrato,
 		OpcionCompra:     req.OpcionCompra,
@@ -185,6 +197,14 @@ func (h *PropertyHandler) CreateProperty(c *fiber.Ctx) error {
 		VideoURL:            req.VideoURL,
 		Descripcion:         policy.Sanitize(strings.TrimSpace(req.Descripcion)),
 		TerminosCondiciones: policy.Sanitize(strings.TrimSpace(req.TerminosCondiciones)),
+	}
+	for _, h := range req.Habitaciones {
+		serviceReq.Habitaciones = append(serviceReq.Habitaciones, service.HabitacionInput{
+			Nombre:      h.Nombre,
+			Descripcion: h.Descripcion,
+			Precio:      h.Precio,
+			Activa:      h.Activa,
+		})
 	}
 
 	// Crear propiedad a través del servicio
@@ -239,6 +259,38 @@ func (h *PropertyHandler) CreateProperty(c *fiber.Ctx) error {
 }
 
 // GetProperty - Obtiene una propiedad por ID
+// marcarDisponibilidadHabitaciones anota en cada habitación si está libre u ocupada
+// (ocupada = con contrato activo). Se calcula siempre para no servir datos viejos del caché.
+func marcarDisponibilidadHabitaciones(property *models.Property) {
+	if !property.AlquilaPorHabitaciones || len(property.Habitaciones) == 0 {
+		return
+	}
+	dbConfig, err := config.GetDatabase()
+	if err != nil {
+		return
+	}
+	var contratos []models.RentalContract
+	dbConfig.DB.Select("id", "habitacion_id").
+		Where("property_id = ? AND estado = ? AND habitacion_id IS NOT NULL AND deleted_at IS NULL",
+			property.ID, models.ContractStatusActivo).
+		Find(&contratos)
+
+	ocupadas := make(map[uint]uint)
+	for _, c := range contratos {
+		if c.HabitacionID != nil {
+			ocupadas[*c.HabitacionID] = c.ID
+		}
+	}
+	for i := range property.Habitaciones {
+		if cid, ok := ocupadas[property.Habitaciones[i].ID]; ok {
+			property.Habitaciones[i].ContratoActivoID = &cid
+			property.Habitaciones[i].Disponible = false
+		} else {
+			property.Habitaciones[i].Disponible = property.Habitaciones[i].Activa
+		}
+	}
+}
+
 func (h *PropertyHandler) GetProperty(c *fiber.Ctx) error {
 	// Obtener ID de la propiedad
 	idStr := c.Params("id")
@@ -258,6 +310,7 @@ func (h *PropertyHandler) GetProperty(c *fiber.Ctx) error {
 		if err == nil {
 			// Found in cache - incrementar vistas
 			h.PropertyService.IncrementViewCount(uint(id))
+			marcarDisponibilidadHabitaciones(cachedProperty)
 			return c.JSON(cachedProperty)
 		}
 		// Cache miss, continue to DB
@@ -278,6 +331,8 @@ func (h *PropertyHandler) GetProperty(c *fiber.Ctx) error {
 			property.VendedorDisponibilidad = vendedor.HorarioVisitas
 		}
 	}
+
+	marcarDisponibilidadHabitaciones(property)
 
 	// Incrementar contador de vistas
 	h.PropertyService.IncrementViewCount(uint(id))
@@ -789,6 +844,16 @@ func (h *PropertyHandler) UpdatePropertyOwner(c *fiber.Ctx) error {
 		"video_url":             req.VideoURL,
 		"descripcion":           policy.Sanitize(strings.TrimSpace(req.Descripcion)),
 		"terminos_condiciones":  policy.Sanitize(strings.TrimSpace(req.TerminosCondiciones)),
+		"alquila_por_habitaciones": req.AlquilaPorHabitaciones,
+	}
+
+	// Si deja de alquilarse por habitaciones, desactivar las existentes
+	if !req.AlquilaPorHabitaciones {
+		if dbCfg, dbErr := config.GetDatabase(); dbErr == nil {
+			dbCfg.DB.Model(&models.Habitacion{}).
+				Where("property_id = ?", id).
+				Update("activa", false)
+		}
 	}
 
 	// Actualizar a través del servicio (valida ownership internamente)

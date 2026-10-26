@@ -84,6 +84,17 @@ type CreatePropertyRequest struct {
 	Descripcion     string
 	TerminosCondiciones string
 	AdvisorID       *uint // Campo para admin
+	// Alquiler por habitaciones
+	AlquilaPorHabitaciones bool
+	Habitaciones           []HabitacionInput
+}
+
+// HabitacionInput - Habitación a crear junto con la propiedad
+type HabitacionInput struct {
+	Nombre      string
+	Descripcion string
+	Precio      *float64
+	Activa      bool
 }
 
 // CreatePropertyImageRequest - Estructura para crear imagen de propiedad
@@ -193,6 +204,8 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 		FechaPublicacion:    fechaPublicacion,
 		FechaExpiracion:     fechaExpiracion, // Fecha en que se eliminará automáticamente
 		AdvisorID:           req.AdvisorID,
+
+		AlquilaPorHabitaciones: req.AlquilaPorHabitaciones,
 	}
 
 	// Guardar snapshot de datos del vendedor
@@ -219,6 +232,25 @@ func (s *PropertyService) CreateProperty(req *CreatePropertyRequest) (*models.Pr
 	// Guardar propiedad
 	if err := s.PropertyRepo.Create(property); err != nil {
 		return nil, errors.DatabaseError(err)
+	}
+
+	// Crear habitaciones (alquiler por habitaciones)
+	if req.AlquilaPorHabitaciones && len(req.Habitaciones) > 0 {
+		for i := range req.Habitaciones {
+			if req.Habitaciones[i].Nombre == "" {
+				continue
+			}
+			hab := models.Habitacion{
+				PropertyID:  property.ID,
+				Nombre:      req.Habitaciones[i].Nombre,
+				Descripcion: req.Habitaciones[i].Descripcion,
+				Precio:      req.Habitaciones[i].Precio,
+				Activa:      req.Habitaciones[i].Activa,
+			}
+			if err := s.db.Create(&hab).Error; err != nil {
+				return nil, errors.DatabaseError(err)
+			}
+		}
 	}
 
 	// 🔄 ASIGNACIÓN DE ASESOR

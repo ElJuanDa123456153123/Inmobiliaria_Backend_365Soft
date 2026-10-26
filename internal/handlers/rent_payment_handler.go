@@ -431,6 +431,7 @@ func (h *RentPaymentHandler) GetPanelTenants(c *fiber.Ctx) error {
 			return db.Order("principal DESC, orden ASC")
 		}).
 		Preload("Inquilino").
+		Preload("Habitacion").
 		Order("created_at DESC").
 		Find(&contracts).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

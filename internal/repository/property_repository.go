@@ -62,6 +62,9 @@ func (r *PropertyRepository) GetByIDWithRelations(id uint) (*models.Property, er
 		}).
 		Preload("Advisor").
 		Preload("PropertyAdvisors.Advisor"). // Incluir múltiples asesores asignados
+		Preload("Habitaciones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("id ASC")
+		}).
 		First(&property, id).Error
 	if err != nil {
 		return nil, err

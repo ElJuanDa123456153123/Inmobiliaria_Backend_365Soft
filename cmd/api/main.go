@@ -669,6 +669,15 @@ func main() {
 		if rentPaymentHandler != nil {
 			panel.Get("/tenants", rentPaymentHandler.GetPanelTenants)
 		}
+
+		// Habitaciones (alquiler por habitaciones)
+		if habDB, habErr := config.GetDatabase(); habErr == nil {
+			habitacionHandler := handlers.NewHabitacionHandler(habDB.DB)
+			panel.Get("/properties/:id/habitaciones", habitacionHandler.ListHabitaciones)
+			panel.Post("/properties/:id/habitaciones", habitacionHandler.CreateHabitacion)
+			panel.Put("/properties/:id/habitaciones/:hid", habitacionHandler.UpdateHabitacion)
+			panel.Delete("/properties/:id/habitaciones/:hid", habitacionHandler.DeleteHabitacion)
+		}
 	}
 
 	// Rutas de contratos de alquiler

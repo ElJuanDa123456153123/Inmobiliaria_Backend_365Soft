@@ -445,35 +445,66 @@ func (h *ProofHandler) ReviewProof(c *fiber.Ctx) error {
 
 		// Procesar el pago: crear suscripción y activar propiedad
 		// Usar transacción para mantener consistencia
+		// (misma lógica que el flujo QR: procesarPago en payment_service.go)
 		err := db.DB.Transaction(func(tx *gorm.DB) error {
-			// 1. Buscar si ya existe una suscripción activa del mismo plan para este usuario
-			var existingSubscription models.Subscription
-			err := tx.Where("user_id = ? AND plan_id = ? AND estado = ?",
-				qrPago.UserID, qrPago.PlanID, "ACTIVA").First(&existingSubscription).Error
+			// 1. Desmarcar suscripciones seleccionadas de OTRO plan
+			if err := tx.Model(&models.Subscription{}).
+				Where("user_id = ? AND plan_id != ? AND seleccionada = ?",
+					qrPago.UserID, qrPago.PlanID, true).
+				Update("seleccionada", false).Error; err != nil {
+				return fmt.Errorf("error desmarcando suscripciones de otros planes: %w", err)
+			}
 
-			if err == gorm.ErrRecordNotFound {
-				// No existe suscripción, crear una nueva
+			// 2. Buscar suscripción seleccionada del MISMO plan
+			var existingSubscription models.Subscription
+			result := tx.Where("user_id = ? AND plan_id = ? AND seleccionada = ?",
+				qrPago.UserID, qrPago.PlanID, true).First(&existingSubscription)
+
+			if result.Error == gorm.ErrRecordNotFound {
+				// No hay suscripción seleccionada de este plan: crear una nueva
+				fechaFin := time.Now().AddDate(0, qrPago.Plan.DuracionMeses, 0)
 				newSubscription := models.Subscription{
-					UserID:    qrPago.UserID,
-					PlanID:    qrPago.PlanID,
-					Estado:    "ACTIVA",
-					FechaInicio: time.Now(),
-					PropiedadesUsadas: 1,
+					UserID:               qrPago.UserID,
+					PlanID:               qrPago.PlanID,
+					FechaInicio:          time.Now(),
+					FechaFin:             &fechaFin,
+					PropiedadesUsadas:    0, // Inicia en 0 (todavía no publicó nada)
+					Estado:               "ACTIVA",
+					RenovacionAutomatica: true,
+					Seleccionada:         true,
 				}
 				if err := tx.Create(&newSubscription).Error; err != nil {
 					return fmt.Errorf("error creando suscripción: %w", err)
 				}
-				fmt.Printf("✅ Nueva suscripción creada para usuario %d\n", qrPago.UserID)
+				fmt.Printf("✅ Nueva suscripción creada (comprobante) para usuario %d\n", qrPago.UserID)
+			} else if result.Error != nil {
+				return fmt.Errorf("error buscando suscripción: %w", result.Error)
 			} else {
-				// Ya existe, acumular una propiedad más
-				if err := tx.Model(&existingSubscription).Update("propiedades_usadas", gorm.Expr("propiedades_usadas + ?", 1)).Error; err != nil {
-					return fmt.Errorf("error actualizando suscripción: %w", err)
+				// Ya existe seleccionada de este plan: ACUMULAR creando otra nueva
+				fechaFin := time.Now().AddDate(0, qrPago.Plan.DuracionMeses, 0)
+
+				if err := tx.Model(&existingSubscription).
+					Update("seleccionada", false).Error; err != nil {
+					return fmt.Errorf("error desmarcando suscripción anterior: %w", err)
 				}
-				fmt.Printf("✅ Suscripción actualizada para usuario %d (propiedades: %d)\n",
-					qrPago.UserID, existingSubscription.PropiedadesUsadas+1)
+
+				subscription := models.Subscription{
+					UserID:               qrPago.UserID,
+					PlanID:               qrPago.PlanID,
+					FechaInicio:          time.Now(),
+					FechaFin:             &fechaFin,
+					PropiedadesUsadas:    0,
+					Estado:               "ACTIVA",
+					RenovacionAutomatica: true,
+					Seleccionada:         true,
+				}
+				if err := tx.Create(&subscription).Error; err != nil {
+					return fmt.Errorf("error creando nueva suscripción: %w", err)
+				}
+				fmt.Printf("✅ Nueva suscripción creada para acumular (comprobante), usuario %d\n", qrPago.UserID)
 			}
 
-			// 2. Activar la propiedad si existe
+			// 3. Activar la propiedad si existe
 			if qrPago.PropertyID != nil && *qrPago.PropertyID > 0 {
 				if err := tx.Model(&models.Property{}).Where("id = ?", *qrPago.PropertyID).
 					Update("estado_propiedad", "activo").Error; err != nil {

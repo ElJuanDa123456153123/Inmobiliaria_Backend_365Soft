@@ -28,6 +28,10 @@ type RentalRequest struct {
 	PropertyID uint     `gorm:"not null;index" json:"property_id"`
 	Property   Property `gorm:"foreignKey:PropertyID" json:"property,omitempty"`
 
+	// Habitación elegida (cuando la propiedad se alquila por habitaciones)
+	HabitacionID *uint      `gorm:"default:null;index" json:"habitacion_id,omitempty"`
+	Habitacion   *Habitacion `gorm:"foreignKey:HabitacionID" json:"habitacion,omitempty"`
+
 	// Interesado que envía la solicitud
 	InquilinoID uint `gorm:"not null;index" json:"inquilino_id"`
 	Inquilino   User `gorm:"foreignKey:InquilinoID" json:"inquilino,omitempty"`

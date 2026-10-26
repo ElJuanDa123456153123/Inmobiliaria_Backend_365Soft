@@ -118,6 +118,10 @@ type Property struct {
 	FechaPublicacion *time.Time    `json:"fecha_publicacion,omitempty"`
 	FechaExpiracion  *time.Time    `json:"fecha_expiracion,omitempty"` // Fecha en que se eliminará automáticamente la publicación
 
+	// === ALQUILER POR HABITACIONES ===
+	AlquilaPorHabitaciones bool           `gorm:"default:false" json:"alquila_por_habitaciones"` // true = se alquila por unidades/habitaciones
+	Habitaciones           []Habitacion   `gorm:"foreignKey:PropertyID" json:"habitaciones,omitempty"`
+
 	// === DATOS PÚBLICOS DEL VENDEDOR (SNAPSHOT) ===
 	// Estos son snapshots de los datos del vendedor al momento de la publicación
 	// Se mantienen aunque el usuario actualice su perfil posteriormente

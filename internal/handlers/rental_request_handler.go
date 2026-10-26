@@ -33,6 +33,7 @@ func NewRentalRequestHandler() (*RentalRequestHandler, error) {
 type CreateRentalRequestRequest struct {
 	Mensaje          string `json:"mensaje"`
 	TelefonoContacto string `json:"telefono_contacto"`
+	HabitacionID     *uint  `json:"habitacion_id,omitempty"` // requerida si la propiedad se alquila por habitaciones
 }
 
 // CreateRentalRequest - El interesado solicita alquilar una propiedad
@@ -76,7 +77,39 @@ func (h *RentalRequestHandler) CreateRentalRequest(c *fiber.Ctx) error {
 		})
 	}
 
-	if prop.Alquilada {
+	// Habitación: obligatoria si la propiedad se alquila por habitaciones
+	var habitacionID *uint
+	if prop.AlquilaPorHabitaciones {
+		if req.HabitacionID == nil || *req.HabitacionID == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Debes elegir una habitación disponible",
+			})
+		}
+		var hab models.Habitacion
+		if err := h.DB.Where("id = ? AND property_id = ? AND deleted_at IS NULL", *req.HabitacionID, propertyID).
+			First(&hab).Error; err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "La habitación no existe en esta propiedad",
+			})
+		}
+		if !hab.Activa {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "Esa habitación no está disponible (en mantenimiento)",
+			})
+		}
+		// Ocupada = tiene contrato activo
+		var activos int64
+		h.DB.Model(&models.RentalContract{}).
+			Where("habitacion_id = ? AND estado = ? AND deleted_at IS NULL",
+				hab.ID, models.ContractStatusActivo).
+			Count(&activos)
+		if activos > 0 {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "Esa habitación ya está alquilada. Elige otra disponible",
+			})
+		}
+		habitacionID = req.HabitacionID
+	} else if prop.Alquilada {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "Esta propiedad ya está alquilada",
 		})
@@ -89,12 +122,17 @@ func (h *RentalRequestHandler) CreateRentalRequest(c *fiber.Ctx) error {
 		})
 	}
 
-	// Evitar solicitudes duplicadas pendientes del mismo usuario para la misma propiedad
-	var dupCount int64
-	h.DB.Model(&models.RentalRequest{}).
+	// Evitar solicitudes duplicadas pendientes del mismo usuario para la misma habitación
+	dupQuery := h.DB.Model(&models.RentalRequest{}).
 		Where("property_id = ? AND inquilino_id = ? AND estado = ? AND deleted_at IS NULL",
-			propertyID, userID, models.RentalRequestStatusPendiente).
-		Count(&dupCount)
+			propertyID, userID, models.RentalRequestStatusPendiente)
+	if habitacionID != nil {
+		dupQuery = dupQuery.Where("habitacion_id = ?", *habitacionID)
+	} else {
+		dupQuery = dupQuery.Where("habitacion_id IS NULL")
+	}
+	var dupCount int64
+	dupQuery.Count(&dupCount)
 	if dupCount > 0 {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "Ya tienes una solicitud pendiente para esta propiedad",
@@ -105,6 +143,7 @@ func (h *RentalRequestHandler) CreateRentalRequest(c *fiber.Ctx) error {
 		PropertyID:       uint(propertyID),
 		InquilinoID:      userID,
 		VendedorID:       prop.UserID,
+		HabitacionID:     habitacionID,
 		Mensaje:          strings.TrimSpace(req.Mensaje),
 		TelefonoContacto: strings.TrimSpace(req.TelefonoContacto),
 		Estado:           models.RentalRequestStatusPendiente,
@@ -154,6 +193,7 @@ func (h *RentalRequestHandler) GetRentalRequests(c *fiber.Ctx) error {
 			return db.Order("principal DESC, orden ASC")
 		}).
 		Preload("Inquilino").
+		Preload("Habitacion").
 		Order("created_at DESC").
 		Find(&solicitudes).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -184,6 +224,7 @@ func (h *RentalRequestHandler) GetMyRentalRequests(c *fiber.Ctx) error {
 		Preload("Property.PropertyImages", func(db *gorm.DB) *gorm.DB {
 			return db.Order("principal DESC, orden ASC")
 		}).
+		Preload("Habitacion").
 		Order("created_at DESC").
 		Find(&solicitudes).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -249,6 +290,7 @@ func (h *RentalRequestHandler) AcceptRentalRequest(c *fiber.Ctx) error {
 	if err := h.DB.Where("id = ? AND vendedor_id = ? AND deleted_at IS NULL", requestID, userID).
 		Preload("Property").
 		Preload("Inquilino").
+		Preload("Habitacion").
 		First(&solicitud).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "Solicitud no encontrada",
@@ -268,7 +310,20 @@ func (h *RentalRequestHandler) AcceptRentalRequest(c *fiber.Ctx) error {
 			"error": "La propiedad ya no está disponible",
 		})
 	}
-	if prop.Alquilada {
+
+	// Revalidar disponibilidad de la habitación elegida
+	if solicitud.HabitacionID != nil {
+		var activos int64
+		h.DB.Model(&models.RentalContract{}).
+			Where("habitacion_id = ? AND estado = ? AND deleted_at IS NULL",
+				*solicitud.HabitacionID, models.ContractStatusActivo).
+			Count(&activos)
+		if activos > 0 {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "La habitación elegida ya fue alquilada. Rechaza esta solicitud y pide al interesado elegir otra",
+			})
+		}
+	} else if prop.Alquilada {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "La propiedad ya está alquilada",
 		})
@@ -327,6 +382,7 @@ func (h *RentalRequestHandler) AcceptRentalRequest(c *fiber.Ctx) error {
 			PropertyID:    prop.ID,
 			InquilinoID:   solicitud.InquilinoID,
 			VendedorID:    userID,
+			HabitacionID:  solicitud.HabitacionID,
 			FechaInicio:   fechaInicio,
 			FechaFin:      fechaFin,
 			MontoMensual:  montoMensual,
@@ -386,17 +442,48 @@ func (h *RentalRequestHandler) AcceptRentalRequest(c *fiber.Ctx) error {
 			}
 		}
 
-		// 5. Marcar propiedad como alquilada
-		if err := tx.Model(&models.Property{}).Where("id = ?", prop.ID).
-			Update("alquilada", true).Error; err != nil {
-			return err
+		// 5. Marcar propiedad como alquilada:
+		//    - Propiedad completa → siempre.
+		//    - Por habitaciones → solo cuando ya NO quedan habitaciones activas libres.
+		if prop.AlquilaPorHabitaciones {
+			var habitacionesActivas, ocupadas int64
+			tx.Model(&models.Habitacion{}).
+				Where("property_id = ? AND activa = ? AND deleted_at IS NULL", prop.ID, true).
+				Count(&habitacionesActivas)
+			if habitacionesActivas == 0 {
+				// Sin habitaciones configuradas: comportamiento de propiedad completa
+				tx.Model(&models.Property{}).Where("id = ?", prop.ID).Update("alquilada", true)
+			} else {
+				// Ocupadas = habitaciones con contrato activo (incluida la recién creada)
+				tx.Model(&models.RentalContract{}).
+					Where("property_id = ? AND estado = ? AND habitacion_id IS NOT NULL AND deleted_at IS NULL",
+						prop.ID, models.ContractStatusActivo).
+					Count(&ocupadas)
+				// +1 por el contrato recién creado dentro de la transacción
+				if ocupadas+1 >= habitacionesActivas {
+					tx.Model(&models.Property{}).Where("id = ?", prop.ID).Update("alquilada", true)
+				} else {
+					tx.Model(&models.Property{}).Where("id = ?", prop.ID).Update("alquilada", false)
+				}
+			}
+		} else {
+			if err := tx.Model(&models.Property{}).Where("id = ?", prop.ID).
+				Update("alquilada", true).Error; err != nil {
+				return err
+			}
 		}
 
-		// 6. Cancelar las demás solicitudes pendientes de esta propiedad
-		if err := tx.Model(&models.RentalRequest{}).
+		// 6. Cancelar las demás solicitudes pendientes SOLO de esta misma habitación
+		//    (las de otras habitaciones siguen vigentes)
+		cancelQuery := tx.Model(&models.RentalRequest{}).
 			Where("property_id = ? AND id != ? AND estado = ? AND deleted_at IS NULL",
-				prop.ID, solicitud.ID, models.RentalRequestStatusPendiente).
-			Update("estado", models.RentalRequestStatusCancelada).Error; err != nil {
+				prop.ID, solicitud.ID, models.RentalRequestStatusPendiente)
+		if solicitud.HabitacionID != nil {
+			cancelQuery = cancelQuery.Where("habitacion_id = ?", *solicitud.HabitacionID)
+		} else {
+			cancelQuery = cancelQuery.Where("habitacion_id IS NULL")
+		}
+		if err := cancelQuery.Update("estado", models.RentalRequestStatusCancelada).Error; err != nil {
 			return err
 		}
 
