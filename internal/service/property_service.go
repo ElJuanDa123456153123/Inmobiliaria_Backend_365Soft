@@ -536,9 +536,15 @@ func (s *PropertyService) validateCreateRequest(req *CreatePropertyRequest) erro
 		return errors.ValidationError("moneda", "Moneda inválida. Debe ser: USD o BOB")
 	}
 
-	// Validar precio según moneda Y tipo de operación
-	if err := ValidarRangoPrecio(req.Precio, req.Moneda, req.TipoOperacion); err != nil {
-		return err
+	// Validar precio según moneda Y tipo de operación.
+	// En alquiler POR HABITACIONES el precio general es solo referencia
+	// (mínimo de las habitaciones), así que no se le aplica el rango.
+	if !req.AlquilaPorHabitaciones {
+		if err := ValidarRangoPrecio(req.Precio, req.Moneda, req.TipoOperacion); err != nil {
+			return err
+		}
+	} else if req.Precio <= 0 && len(req.Habitaciones) == 0 {
+		return errors.ValidationError("precio", "Define al menos una habitación con precio")
 	}
 
 	// Validar coordenadas (Bolivia)
