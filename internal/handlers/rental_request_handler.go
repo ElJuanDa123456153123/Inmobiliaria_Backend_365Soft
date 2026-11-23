@@ -496,6 +496,22 @@ func (h *RentalRequestHandler) AcceptRentalRequest(c *fiber.Ctx) error {
 			return err
 		}
 
+		// 8. Crear automáticamente el hilo de mensajería vendedor ↔ inquilino
+		//    (así ambos se ven en Consultas aunque nunca hayan chateado)
+		propiedadID := prop.ID
+		mensajeBienvenida := "📄 Se creó el contrato de " + string(tipoContrato) + " para \"" + prop.Titulo +
+			"\". Por este chat puedes consultarme sobre pagos, fechas o cualquier duda."
+		if err := tx.Create(&models.Message{
+			DeUserID:    userID,
+			ParaUserID:  solicitud.InquilinoID,
+			PropertyID:  &propiedadID,
+			Mensaje:     mensajeBienvenida,
+			TipoMensaje: "texto",
+			Leido:       false,
+		}).Error; err != nil {
+			return err
+		}
+
 		return nil
 	})
 

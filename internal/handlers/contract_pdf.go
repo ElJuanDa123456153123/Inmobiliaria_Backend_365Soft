@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"bytes"
@@ -77,12 +77,19 @@ func transliterar(s string) string {
 	return b.String()
 }
 
-// generarPDFContrato - Genera el PDF de un contrato de alquiler en memoria
+// generarPDFContrato - Genera el PDF del contrato con formato de plantilla
+// legal oficial: título formal, declaración de partes, descripción del
+// inmueble, tabla de condiciones económicas, cláusulas numeradas y firmas.
 func generarPDFContrato(contract *models.RentalContract) ([]byte, error) {
+	const margenX = 20.0
+	const ancho = 170.0 // ancho útil A4 (210mm) con márgenes de 20mm
+	const grisTexto = 100
+	const grisFooter = 130
+
 	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(15, 15, 15)
-	pdf.SetAutoPageBreak(true, 24)
-	pdf.AddPage()
+	pdf.SetMargins(margenX, 18, margenX)
+	pdf.SetAutoPageBreak(true, 28)
+	pdf.AliasNbPages("")
 
 	utf8OK := cargarFuentesUTF8(pdf)
 	t := func(s string) string {
@@ -99,7 +106,23 @@ func generarPDFContrato(contract *models.RentalContract) ([]byte, error) {
 		}
 	}
 
-	width := 180.0 // ancho útil A4 con márgenes de 15mm
+	// Pie de página en todas las hojas: regla fina + numeración
+	pdf.SetFooterFunc(func() {
+		pdf.SetY(-17)
+		pdf.SetDrawColor(150, 150, 150)
+		pdf.SetLineWidth(0.2)
+		pdf.Line(margenX, pdf.GetY(), margenX+ancho, pdf.GetY())
+		pdf.SetY(-14)
+		fuente("", 7.5)
+		pdf.SetTextColor(grisFooter, grisFooter, grisFooter)
+		pdf.SetX(margenX)
+		pdf.CellFormat(ancho/2, 4.5, t("365Soft Inmobiliaria"), "", 0, "L", false, 0, "")
+		pdf.CellFormat(ancho/2, 4.5, t(fmt.Sprintf("Contrato Nro. %d  ·  Página %d de %d",
+			contract.ID, pdf.PageNo(), pdf.PageCount())), "", 0, "R", false, 0, "")
+		pdf.SetTextColor(0, 0, 0)
+	})
+
+	pdf.AddPage()
 
 	// Código de verificación: hash SHA-256 de los datos clave del contrato
 	hash := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%s|%s|%s|%s|%.2f|%s",
@@ -118,166 +141,229 @@ func generarPDFContrato(contract *models.RentalContract) ([]byte, error) {
 		return strings.Join(partes, "-")
 	}
 
-	// ===== ENCABEZADO =====
-	pdf.SetFillColor(30, 58, 138) // azul oscuro
-	pdf.RoundedRect(15, 15, width, 20, 2.5, "1234", "F")
-	pdf.SetTextColor(255, 255, 255)
-	fuente("B", 15)
-	pdf.SetXY(15, 18)
-	pdf.CellFormat(width, 8, t("CONTRATO DE ALQUILER DE INMUEBLE"), "", 1, "C", false, 0, "")
-	fuente("", 9)
-	pdf.SetX(15)
-	pdf.CellFormat(width, 5, t(fmt.Sprintf("365Soft Inmobiliaria  ·  Contrato Nro. %d", contract.ID)), "", 1, "C", false, 0, "")
-	pdf.SetTextColor(0, 0, 0)
-	pdf.Ln(6)
-
-	// Helper: fila etiqueta (negrita) + valor con ajuste de línea
-	kv := func(label, valor string, lw float64) {
-		fuente("B", 9.5)
-		pdf.CellFormat(lw, 5.6, label, "", 0, "L", false, 0, "")
-		fuente("", 9.5)
-		pdf.MultiCell(width-lw, 5.6, valor, "", "L", false)
-	}
-
-	// Helper: título de sección con banda
-	seccion := func(titulo string) {
-		pdf.Ln(2)
-		pdf.SetFillColor(234, 240, 252)
-		pdf.SetTextColor(30, 58, 138)
-		fuente("B", 11)
-		pdf.CellFormat(width, 7, "  "+t(titulo), "", 1, "L", true, 0, "")
+	// Helper: párrafo de cuerpo con ajuste de línea
+	parrafo := func(s string, alineacion string) {
+		fuente("", 10)
 		pdf.SetTextColor(0, 0, 0)
-		pdf.Ln(2.5)
+		pdf.SetX(margenX)
+		pdf.MultiCell(ancho, 5.6, t(s), "", alineacion, false)
 	}
+
+	// Helper: título de sección numerado, centrado y subrayado con regla fina
+	seccion := func(titulo string) {
+		pdf.Ln(4)
+		fuente("B", 10.5)
+		pdf.SetTextColor(0, 0, 0)
+		pdf.SetX(margenX)
+		pdf.CellFormat(ancho, 6, t(titulo), "", 2, "C", false, 0, "")
+		pdf.SetDrawColor(60, 60, 60)
+		pdf.SetLineWidth(0.3)
+		pdf.Line(margenX+40, pdf.GetY()+0.8, margenX+ancho-40, pdf.GetY()+0.8)
+		pdf.Ln(3.5)
+	}
+
+	// ===== ENCABEZADO =====
+	fuente("I", 8)
+	pdf.SetTextColor(grisTexto, grisTexto, grisTexto)
+	pdf.SetX(margenX)
+	pdf.CellFormat(ancho, 4, t("365Soft Inmobiliaria  ·  Plataforma de gestión inmobiliaria"), "", 2, "R", false, 0, "")
+	pdf.SetTextColor(0, 0, 0)
+	pdf.Ln(2)
+
+	tituloDoc := "CONTRATO DE ALQUILER DE INMUEBLE"
+	if contract.TipoContrato == models.ContractTypeAnticretico {
+		tituloDoc = "CONTRATO DE ANTICRÉTICO DE INMUEBLE"
+	}
+	fuente("B", 14)
+	pdf.SetX(margenX)
+	pdf.CellFormat(ancho, 8, t(tituloDoc), "", 2, "C", false, 0, "")
+	fuente("", 10)
+	pdf.SetX(margenX)
+	pdf.CellFormat(ancho, 5.5, t(fmt.Sprintf("Contrato Nro. %d", contract.ID)), "", 2, "C", false, 0, "")
+	pdf.Ln(1)
+	pdf.SetX(margenX)
+	pdf.CellFormat(ancho, 5.5, t("Cochabamba, "+fechaLarga(contract.FechaInicio)), "", 2, "R", false, 0, "")
+	pdf.Ln(1.5)
+	pdf.SetDrawColor(0, 0, 0)
+	pdf.SetLineWidth(0.5)
+	pdf.Line(margenX, pdf.GetY(), margenX+ancho, pdf.GetY())
+	pdf.Ln(6)
 
 	// ===== I. PARTES =====
 	seccion("I. PARTES DEL CONTRATO")
 
-	cajaParte := func(x float64, rol, nombre, ci, tel, email string) {
-		boxW := 88.0
-		pdf.SetDrawColor(200, 210, 230)
-		pdf.SetFillColor(249, 250, 252)
-		pdf.RoundedRect(x, pdf.GetY(), boxW, 30, 2, "1234", "FD")
-		y := pdf.GetY() + 3
-		fuente("B", 9)
-		pdf.SetXY(x, y)
-		pdf.SetTextColor(30, 58, 138)
-		pdf.CellFormat(boxW, 5, t(rol), "", 2, "C", false, 0, "")
-		pdf.SetTextColor(0, 0, 0)
-		fuente("B", 9.5)
-		pdf.SetX(x + 4)
-		pdf.CellFormat(boxW-8, 5, nombre, "", 2, "L", false, 0, "")
-		fuente("", 8.5)
-		pdf.SetX(x + 4)
-		pdf.CellFormat(boxW-8, 4.5, t("CI: ")+ci, "", 2, "L", false, 0, "")
-		pdf.SetX(x + 4)
-		pdf.CellFormat(boxW-8, 4.5, t("Tel: ")+tel, "", 2, "L", false, 0, "")
-		pdf.SetX(x + 4)
-		pdf.CellFormat(boxW-8, 4.5, "Email: "+email, "", 0, "L", false, 0, "")
+	descripcionParte := func(nombre, apellido, ci, tel, email string) string {
+		var b strings.Builder
+		b.WriteString("Don " + strings.ToUpper(strings.TrimSpace(nombre+" "+apellido)) + ", mayor de edad")
+		if strings.TrimSpace(ci) != "" {
+			b.WriteString(", con Cédula de Identidad Nro. " + ci)
+		}
+		if strings.TrimSpace(tel) != "" {
+			b.WriteString(", teléfono " + tel)
+		}
+		if strings.TrimSpace(email) != "" {
+			b.WriteString(", correo electrónico " + email)
+		}
+		return b.String()
 	}
-
-	yCajas := pdf.GetY()
-	cajaParte(15, "ARRENDADOR (Propietario)",
-		strings.TrimSpace(contract.Vendedor.Nombre+" "+contract.Vendedor.Apellido),
-		contract.Vendedor.CI, contract.Vendedor.Telefono, contract.Vendedor.Email)
-	cajaParte(15+92, "ARRENDATARIO (Inquilino)",
-		strings.TrimSpace(contract.Inquilino.Nombre+" "+contract.Inquilino.Apellido),
-		contract.Inquilino.CI, contract.Inquilino.Telefono, contract.Inquilino.Email)
-	// Ambas cajas se dibujaron a la misma altura; avanzar debajo de ellas
-	pdf.SetY(yCajas + 32)
+	parrafo(descripcionParte(contract.Vendedor.Nombre, contract.Vendedor.Apellido, contract.Vendedor.CI,
+		contract.Vendedor.Telefono, contract.Vendedor.Email)+", en adelante EL ARRENDADOR;", "J")
 	pdf.Ln(1)
+	parrafo(descripcionParte(contract.Inquilino.Nombre, contract.Inquilino.Apellido, contract.Inquilino.CI,
+		contract.Inquilino.Telefono, contract.Inquilino.Email)+", en adelante EL ARRENDATARIO;", "J")
+	pdf.Ln(1)
+	introContrato := "quienes, en pleno uso de sus facultades legales, convienen en celebrar el presente contrato de alquiler de inmueble, conforme a las cláusulas y condiciones siguientes:"
+	if contract.TipoContrato == models.ContractTypeAnticretico {
+		introContrato = "quienes, en pleno uso de sus facultades legales, convienen en celebrar el presente contrato de anticrético de inmueble, conforme a las cláusulas y condiciones siguientes:"
+	}
+	parrafo(introContrato, "J")
 
 	// ===== II. INMUEBLE =====
-	seccion("II. INMUEBLE OBJETO DEL CONTRATO")
+	seccion("II. DEL INMUEBLE OBJETO DEL CONTRATO")
 	direccion := contract.Property.Direccion
 	if direccion == "" {
-		direccion = "(Dirección no especificada)"
+		direccion = "(dirección no especificada)"
 	}
-	kv(t("Título:"), contract.Property.Titulo, 42)
-	kv(t("Tipo:"), string(contract.Property.TipoPropiedad), 42)
-	kv(t("Dirección:"), direccion, 42)
-	kv(t("Zona:"), contract.Property.Zona, 42)
+	zona := contract.Property.Zona
+	if zona == "" {
+		zona = "(zona no especificada)"
+	}
+	parrafo(fmt.Sprintf("El inmueble materia del presente contrato es el señalado como \"%s\", del tipo %s, ubicado en %s, zona %s. "+
+		"El ARRENDATARIO declara conocer el inmueble y recibirlo en buen estado de conservación, obligándose a devolverlo en las mismas condiciones al finalizar el contrato, salvo el deterioro producto del uso ordinario.",
+		contract.Property.Titulo, contract.Property.TipoPropiedad, direccion, zona), "J")
 
 	// ===== III. CONDICIONES ECONÓMICAS =====
 	seccion("III. CONDICIONES ECONÓMICAS")
 	moneda := contract.Property.Moneda
-	kv(t("Renta mensual:"), formatMonto(contract.MontoMensual, moneda), 52)
-	kv(t("Fecha de inicio:"), fechaLarga(contract.FechaInicio), 52)
-	kv(t("Fecha de finalización:"), fechaLarga(contract.FechaFin), 52)
-	kv(t("Plazo:"), fmt.Sprintf("%d meses", mesesEntre(contract.FechaInicio, contract.FechaFin)), 52)
-	if contract.MontoDeposito > 0 {
-		kv(t("Depósito de garantía:"), formatMonto(contract.MontoDeposito, moneda)+" (reembolsable al finalizar el contrato)", 52)
-	} else {
-		kv(t("Depósito de garantía:"), "Sin depósito", 52)
+	filaTabla := func(etiqueta, valor string) {
+		fuente("B", 9.5)
+		pdf.SetTextColor(0, 0, 0)
+		pdf.SetX(margenX)
+		pdf.SetFillColor(242, 242, 242)
+		pdf.CellFormat(58, 7.2, t(etiqueta), "1", 0, "L", true, 0, "")
+		fuente("", 9.5)
+		pdf.CellFormat(ancho-58, 7.2, t(valor), "1", 1, "L", false, 0, "")
 	}
+	if contract.TipoContrato == models.ContractTypeAnticretico {
+		filaTabla("Anticrético:", formatMonto(contract.MontoDeposito, moneda))
+	} else {
+		filaTabla("Renta mensual:", formatMonto(contract.MontoMensual, moneda))
+	}
+	filaTabla("Plazo del contrato:", fmt.Sprintf("%d meses", mesesEntre(contract.FechaInicio, contract.FechaFin)))
+	filaTabla("Fecha de inicio:", fechaLarga(contract.FechaInicio))
+	filaTabla("Fecha de finalización:", fechaLarga(contract.FechaFin))
+	if contract.MontoDeposito > 0 && contract.TipoContrato != models.ContractTypeAnticretico {
+		filaTabla("Depósito de garantía:", formatMonto(contract.MontoDeposito, moneda)+" (reembolsable al finalizar el contrato)")
+	} else {
+		filaTabla("Depósito de garantía:", "Sin depósito")
+	}
+	filaTabla("Destino del inmueble:", "Exclusivamente vivienda")
 
 	// ===== IV. CLÁUSULAS =====
 	seccion("IV. CLÁUSULAS")
-	clausulas := []string{
-		fmt.Sprintf("PRIMERA.- El ARRENDADOR cede en alquiler al ARRENDATARIO el inmueble descrito, por el plazo indicado, a partir del %s.", fechaLarga(contract.FechaInicio)),
-		fmt.Sprintf("SEGUNDA.- El ARRENDATARIO pagará la renta mensual de %s, por adelantado, dentro de los primeros días de cada mes.", formatMonto(contract.MontoMensual, moneda)),
-		"TERCERA.- El ARRENDATARIO destinará el inmueble exclusivamente a vivienda, no pudiendo subarrendarlo ni cederlo sin autorización escrita del ARRENDADOR.",
-		"CUARTA.- El ARRENDATARIO se hace cargo de los servicios básicos (luz, agua, gas, internet) y del mantenimiento por uso ordinario del inmueble.",
-		"QUINTA.- El depósito de garantía se devolverá al ARRENDATARIO al finalizar el contrato, previa verificación del estado del inmueble y cumplimiento de sus obligaciones.",
-		"SEXTA.- El incumplimiento de pago de dos o más cuotas faculta al ARRENDADOR a resolver el contrato y exigir la desocupación del inmueble.",
-		"SEPTIMA.- Para la resolución de cualquier controversia, las partes se someten a la legislación boliviana y a la mediación competente.",
+	var clausulas []string
+	if contract.TipoContrato == models.ContractTypeAnticretico {
+		clausulas = []string{
+			fmt.Sprintf("PRIMERA.- El ARRENDADOR recibe del ARRENDATARIO la suma de %s en calidad de anticrético, cantidad que será devuelta al ARRENDATARIO de una sola vez al finalizar el contrato, a la devolución del inmueble, sin lugar a reembolso o reclamo adicional alguno.", formatMonto(contract.MontoDeposito, moneda)),
+			fmt.Sprintf("SEGUNDA.- El presente contrato se celebra por el plazo indicado, a partir del %s, no existiendo pago de renta mensual entre las partes.", fechaLarga(contract.FechaInicio)),
+			"TERCERA.- El ARRENDATARIO destinará el inmueble exclusivamente a vivienda, no pudiendo subarrendarlo total ni parcialmente, ni ceder sus derechos sobre el presente contrato, sin autorización previa y escrita del ARRENDADOR.",
+			"CUARTA.- El ARRENDATARIO se hará cargo del pago de los servicios básicos del inmueble (energía eléctrica, agua, gas e internet) y del mantenimiento por uso ordinario del mismo.",
+			"QUINTA.- Al finalizar el contrato, el ARRENDATARIO desocupará el inmueble y entregará las llaves al ARRENDADOR, quien verificará el estado del inmueble antes de efectuar la devolución del anticrético.",
+			"SEXTA.- Cualquiera de las partes podrá dar por concluido el presente contrato de manera anticipada, mediante notificación escrita cursada con al menos treinta días de anticipación.",
+			"SÉPTIMA.- Para todos los efectos derivados del presente contrato, las partes se someten a la legislación boliviana y a la autoridad competente del lugar donde se encuentra el inmueble.",
+			"OCTAVA.- Las partes aceptan que la firma electrónica aplicada a través de la plataforma tiene la misma validez y eficacia legal que la firma manuscrita, y que el presente documento digital reproduce fielmente el acuerdo alcanzado.",
+		}
+	} else {
+		clausulas = []string{
+			fmt.Sprintf("PRIMERA.- El ARRENDADOR cede en alquiler al ARRENDATARIO el inmueble descrito en este contrato, por el plazo indicado, a partir del %s.", fechaLarga(contract.FechaInicio)),
+			fmt.Sprintf("SEGUNDA.- El ARRENDATARIO pagará la renta mensual de %s, por adelantado, dentro de los primeros cinco días de cada mes.", formatMonto(contract.MontoMensual, moneda)),
+			"TERCERA.- El ARRENDATARIO destinará el inmueble exclusivamente a vivienda, no pudiendo subarrendarlo total ni parcialmente, ni ceder sus derechos sobre el presente contrato, sin autorización previa y escrita del ARRENDADOR.",
+			"CUARTA.- El ARRENDATARIO se hará cargo del pago de los servicios básicos del inmueble (energía eléctrica, agua, gas e internet) y del mantenimiento por uso ordinario del mismo.",
+			"QUINTA.- El depósito de garantía se devolverá al ARRENDATARIO al finalizar el contrato, previa verificación del estado del inmueble y del cumplimiento de todas las obligaciones asumidas.",
+			"SEXTA.- El incumplimiento del pago de dos o más cuotas facultará al ARRENDADOR a resolver el contrato de manera anticipada y exigir la desocupación del inmueble, sin perjuicio de las acciones legales que correspondan.",
+			"SÉPTIMA.- Para todos los efectos derivados del presente contrato, las partes se someten a la legislación boliviana y a la autoridad competente del lugar donde se encuentra el inmueble.",
+			"OCTAVA.- Las partes aceptan que la firma electrónica aplicada a través de la plataforma tiene la misma validez y eficacia legal que la firma manuscrita, y que el presente documento digital reproduce fielmente el acuerdo alcanzado.",
+		}
 	}
-	fuente("", 9.5)
 	for _, clausula := range clausulas {
-		pdf.MultiCell(width, 5.4, t(clausula), "", "J", false)
+		parrafo(clausula, "J")
 		pdf.Ln(1.5)
 	}
 
-	// ===== V. ACEPTACIÓN Y FIRMA =====
-	if pdf.GetY() > 215 {
+	// ===== V. FIRMAS =====
+	if pdf.GetY() > 232 {
 		pdf.AddPage()
 	}
-	seccion("V. ACEPTACIÓN Y FIRMA ELECTRÓNICA")
+	seccion("V. ACEPTACIÓN Y FIRMA")
+	parrafo(fmt.Sprintf("En la ciudad de Cochabamba, a los %d días del mes de %s del año %d, previa lectura del presente contrato, las partes lo aceptan en todas sus partes y lo firman de conformidad, en dos ejemplares de igual tenor y a un solo efecto.",
+		contract.FechaInicio.Day(), mesesEs[int(contract.FechaInicio.Month())-1], contract.FechaInicio.Year()), "J")
 
-	pdf.Ln(8)
+	pdf.Ln(7)
+	// Ambas columnas de firma se dibujan a la MISMA altura (firmaY explícita)
 	firmaY := pdf.GetY()
-
-	// Nombre + línea + aceptación electrónica por parte
 	firmaParte := func(x float64, rol, nombre, ci string) {
-		fuente("B", 9.5)
+		fuente("", 9)
+		pdf.SetTextColor(0, 0, 0)
 		pdf.SetXY(x, firmaY)
-		pdf.CellFormat(85, 5, nombre, "", 2, "C", false, 0, "")
-		pdf.SetDrawColor(60, 60, 60)
-		pdf.Line(x+12, firmaY+9, x+73, firmaY+9)
+		pdf.CellFormat(70, 5, t(rol), "", 0, "C", false, 0, "")
+		pdf.SetDrawColor(0, 0, 0)
+		pdf.SetLineWidth(0.35)
+		pdf.Line(x+5, firmaY+12, x+65, firmaY+12)
+		fuente("B", 9.5)
+		pdf.SetXY(x, firmaY+14)
+		pdf.CellFormat(70, 5, nombre, "", 0, "C", false, 0, "")
+		ciTexto := "C.I. Nro. " + ci
+		if strings.TrimSpace(ci) == "" {
+			ciTexto = "C.I. Nro. ......................."
+		}
 		fuente("", 8.5)
-		pdf.SetXY(x, firmaY+11)
-		pdf.CellFormat(85, 4.5, t(rol), "", 2, "C", false, 0, "")
-		pdf.SetXY(x, firmaY+15.5)
-		pdf.CellFormat(85, 4.5, t("CI: ")+ci, "", 2, "C", false, 0, "")
-		pdf.SetXY(x, firmaY+20)
+		pdf.SetXY(x, firmaY+18.5)
+		pdf.CellFormat(70, 4.5, t(ciTexto), "", 0, "C", false, 0, "")
 		fuente("I", 7.5)
-		pdf.SetTextColor(110, 120, 140)
-		pdf.CellFormat(85, 4, t("Firma electrónica de aceptación"), "", 2, "C", false, 0, "")
+		pdf.SetTextColor(grisTexto, grisTexto, grisTexto)
+		pdf.SetXY(x, firmaY+23)
+		pdf.CellFormat(70, 4, t("Firma electrónica aplicada en la plataforma"), "", 0, "C", false, 0, "")
 		pdf.SetTextColor(0, 0, 0)
 	}
-	firmaParte(15, "ARRENDADOR", strings.TrimSpace(contract.Vendedor.Nombre+" "+contract.Vendedor.Apellido), contract.Vendedor.CI)
-	firmaParte(110, "ARRENDATARIO", strings.TrimSpace(contract.Inquilino.Nombre+" "+contract.Inquilino.Apellido), contract.Inquilino.CI)
+	firmaParte(margenX, "EL ARRENDADOR",
+		strings.TrimSpace(contract.Vendedor.Nombre+" "+contract.Vendedor.Apellido), contract.Vendedor.CI)
+	firmaParte(margenX+100, "EL ARRENDATARIO",
+		strings.TrimSpace(contract.Inquilino.Nombre+" "+contract.Inquilino.Apellido), contract.Inquilino.CI)
+	// Continuar debajo de la columna de firma más profunda
+	pdf.SetY(firmaY + 29)
 
-	pdf.SetY(firmaY + 28)
-	pdf.Ln(2)
+	// Nota de generación electrónica
+	fuente("I", 8)
+	pdf.SetTextColor(grisTexto, grisTexto, grisTexto)
+	pdf.SetX(margenX)
+	pdf.CellFormat(ancho, 4.5, t(fmt.Sprintf("Documento firmado electrónicamente a través de 365Soft el %s a horas %s.",
+		time.Now().Format("02/01/2006"), time.Now().Format("15:04"))), "", 2, "C", false, 0, "")
+	pdf.SetTextColor(0, 0, 0)
+	pdf.Ln(4)
 
-	// Código de verificación del documento
-	pdf.SetFillColor(248, 250, 252)
-	pdf.SetDrawColor(210, 218, 230)
-	pdf.RoundedRect(15, pdf.GetY(), width, 14, 2, "1234", "FD")
-	fuente("B", 8.5)
-	pdf.SetXY(15, pdf.GetY()+2.5)
-	pdf.CellFormat(width, 4.5, t("CÓDIGO DE VERIFICACIÓN DEL DOCUMENTO"), "", 2, "C", false, 0, "")
-	fuente("", 9)
-	pdf.SetX(15)
-	pdf.CellFormat(width, 5, codigoFormateado(), "", 2, "C", false, 0, "")
+	// Código de verificación del documento (si no cabe completo, página nueva)
+	if pdf.GetY() > 250 {
+		pdf.AddPage()
+	}
+	pdf.SetDrawColor(0, 0, 0)
+	pdf.SetLineWidth(0.35)
+	boxY := pdf.GetY()
+	pdf.Rect(margenX, boxY, ancho, 17, "D")
+	fuente("B", 8)
+	pdf.SetXY(margenX, boxY+2.5)
+	pdf.CellFormat(ancho, 4, t("CÓDIGO DE VERIFICACIÓN DEL DOCUMENTO (SHA-256)"), "", 2, "C", false, 0, "")
+	fuente("B", 9)
+	pdf.SetX(margenX)
+	pdf.CellFormat(ancho, 5, codigoFormateado(), "", 2, "C", false, 0, "")
 
-	// Nota legal
+	// Nota legal (debajo del recuadro, sin cruzar el borde)
+	pdf.SetY(boxY + 17)
 	pdf.Ln(3)
 	fuente("I", 7.5)
-	pdf.SetTextColor(110, 120, 140)
-	pdf.MultiCell(width, 4,
-		t(fmt.Sprintf("Documento generado electrónicamente por 365Soft el %s. Ambas partes manifestaron su aceptación a través de la plataforma. La autenticidad del documento puede verificarse con el código anterior, calculado mediante SHA-256 sobre los datos esenciales del contrato.", time.Now().Format("02/01/2006 15:04"))),
+	pdf.SetTextColor(grisTexto, grisTexto, grisTexto)
+	pdf.SetX(margenX)
+	pdf.MultiCell(ancho, 4,
+		t("La autenticidad de este documento puede verificarse contrastando el código anterior, calculado mediante el algoritmo SHA-256 sobre los datos esenciales del contrato (partes, fechas, inmueble y montos)."),
 		"", "C", false)
 	pdf.SetTextColor(0, 0, 0)
 

@@ -324,7 +324,7 @@ func (h *RentPaymentHandler) GetPaymentHistory(c *fiber.Ctx) error {
 
 	// Obtener pagos
 	var payments []models.RentPayment
-	if err := query.Preload("Contract").Preload("Contract.Property").Preload("Contract.Vendedor").Preload("Inquilino").Preload("Vendedor").
+	if err := query.Preload("Contract").Preload("Contract.Property").Preload("Contract.Property.PropertyImages").Preload("Contract.Vendedor").Preload("Inquilino").Preload("Vendedor").
 		Order("anio DESC, mes_correspondiente DESC").
 		Find(&payments).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -335,6 +335,63 @@ func (h *RentPaymentHandler) GetPaymentHistory(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"pagos": payments,
 		"total": len(payments),
+	})
+}
+
+// RetirarComprobanteVenta - El comprador retira un comprobante enviado por error:
+// el pago vuelve a pendiente y puede subir uno nuevo
+// PATCH /api/purchase-payments/:id/retirar-comprobante
+func (h *RentPaymentHandler) RetirarComprobanteVenta(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	paymentID, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "ID de pago inválido",
+		})
+	}
+
+	var pago models.SalePayment
+	if err := h.DB.Where("id = ? AND comprador_id = ?", paymentID, userID).
+		Preload("PurchaseRequest").
+		Preload("PurchaseRequest.Property").
+		First(&pago).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Pago no encontrado",
+		})
+	}
+
+	if pago.Estado != models.SalePaymentStatusComprobante {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "Solo puedes retirar un comprobante que aún no fue confirmado por el vendedor",
+		})
+	}
+
+	pago.MetodoPago = ""
+	pago.ComprobanteURL = ""
+	pago.FechaPago = nil
+	pago.FechaComprobante = nil
+	pago.Estado = models.SalePaymentStatusPendiente
+
+	if err := h.DB.Save(&pago).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error retirando el comprobante",
+		})
+	}
+
+	// 🔔 Notificar al vendedor
+	h.DB.Create(&models.Notification{
+		UserID:     pago.VendedorID,
+		PropertyID: &pago.PurchaseRequest.PropertyID,
+		Tipo:       "comprobante_retirado",
+		Titulo:     "Comprobante retirado",
+		Mensaje:    "El comprador retiró el comprobante de " + fmt.Sprintf("%.2f", pago.Monto) + " por \"" + pago.PurchaseRequest.Property.Titulo + "\". Volverá a subir uno nuevo",
+		IsRead:     false,
+	})
+
+	return c.JSON(fiber.Map{
+		"message": "Comprobante retirado. Puedes subir uno nuevo cuando quieras",
+		"pago":    pago,
 	})
 }
 

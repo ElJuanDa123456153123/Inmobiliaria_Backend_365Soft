@@ -27,8 +27,21 @@ func NewRentJob() (*RentJob, error) {
 }
 
 // UpdateOverduePayments - Marca como atrasadas las cuotas/depósitos pendientes cuya fecha de vencimiento ya pasó
+// UpdateOverduePayments - Marca como atrasadas las cuotas/depósitos pendientes cuya fecha de vencimiento ya pasó
+// y notifica a ambas partes
 func (j *RentJob) UpdateOverduePayments() (int64, error) {
 	today := time.Now().Truncate(24 * time.Hour)
+
+	// Buscar primero las cuotas que van a marcarse atrasadas (para notificar)
+	var vencidas []models.RentPayment
+	j.DB.DB.
+		Preload("Contract").
+		Preload("Contract.Property").
+		Where("estado = ? AND tipo IN ? AND deleted_at IS NULL AND fecha_pago < ?",
+			models.PaymentStatusPendiente,
+			[]models.PaymentType{models.PaymentTypeCuota, models.PaymentTypeDeposito},
+			today).
+		Find(&vencidas)
 
 	result := j.DB.DB.Model(&models.RentPayment{}).
 		Where("estado = ? AND tipo IN ? AND deleted_at IS NULL AND fecha_pago < ?",
@@ -40,8 +53,36 @@ func (j *RentJob) UpdateOverduePayments() (int64, error) {
 	if result.Error != nil {
 		return 0, result.Error
 	}
+
+	// Notificar a inquilino y propietario por cada cuota que pasó a atrasada
+	for _, cuota := range vencidas {
+		fechaVenc := cuota.FechaPago.Format("02/01/2006")
+		tituloCuota := "cuota"
+		if cuota.Tipo != "cuota" {
+			tituloCuota = string(cuota.Tipo)
+		}
+		resumenMonto := fmt.Sprintf("%.2f", cuota.Monto)
+		j.DB.DB.Create(&models.Notification{
+			UserID:     cuota.InquilinoID,
+			PropertyID: &cuota.Contract.PropertyID,
+			Tipo:       "cuota_atrasada",
+			Titulo:     "⚠ Tienes un pago atrasado",
+			Mensaje:    tituloCuota + " de Bs. " + resumenMonto + " de \"" + cuota.Contract.Property.Titulo + "\" venció el " + fechaVenc + ". Registra tu pago lo antes posible",
+			IsRead:     false,
+		})
+		j.DB.DB.Create(&models.Notification{
+			UserID:     cuota.VendedorID,
+			PropertyID: &cuota.Contract.PropertyID,
+			Tipo:       "cuota_atrasada",
+			Titulo:     "⚠ Cuota atrasada de tu inquilino",
+			Mensaje:    tituloCuota + " de Bs. " + resumenMonto + " de \"" + cuota.Contract.Property.Titulo + "\" venció el " + fechaVenc + " y sigue sin pago",
+			IsRead:     false,
+		})
+	}
+
 	return result.RowsAffected, nil
 }
+
 
 // ExpireContracts - Marca como vencidos los contratos activos cuya fecha_fin ya pasó
 // y libera las propiedades que ya no tienen contratos activos

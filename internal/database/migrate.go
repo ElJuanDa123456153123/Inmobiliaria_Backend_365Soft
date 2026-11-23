@@ -40,11 +40,15 @@ func AutoMigrate() error {
 		// 📦 Panel /panel y /mis-contratos
 		&models.PropertyContact{},  // 👥 Contactos de propiedades
 		&models.Message{},          // 💬 Mensajería entre usuarios
+		&models.SiteSetting{},      // ⚙️ Configuración global del sitio
 		&models.Visit{},            // 📅 Visitas agendadas
 		&models.RentalContract{},   // 📜 Contratos de alquiler
 		&models.RentPayment{},      // 💰 Pagos de alquiler
-		&models.RentalRequest{},    // 📨 Solicitudes de alquiler
-		&models.Habitacion{},       // 🛏️ Habitaciones (alquiler por habitaciones)
+		&models.RentalRequest{},   // 📨 Solicitudes de alquiler
+		&models.Habitacion{},      // 🛏️ Habitaciones (alquiler por habitaciones)
+		&models.PurchaseRequest{}, // 🛒 Solicitudes de compra (venta)
+		&models.SalePayment{},     // 💰 Pagos de venta (único/arras/saldo)
+		&models.SaleDocument{},    // 📋 Checklist documental de la venta
 	)
 	if err != nil {
 		return fmt.Errorf("error ejecutando migración: %w", err)

@@ -35,16 +35,16 @@ func main() {
 
 	// Crear app de Fiber
 	app := fiber.New(fiber.Config{
-		AppName:      "Inmobiliaria API v1.0",
+		AppName:        "Inmobiliaria API v1.0",
 		ReadBufferSize: 16384, // 16KB para evitar error 431 con cookies grandes
 	})
 
 	// 🔒 Middleware profesional
-	app.Use(middleware.RecoverMiddleware())       // Recupera de panics
-	app.Use(middleware.RequestIDMiddleware())     // Añade ID único
-	app.Use(middleware.LoggingMiddleware())       // Logs estructurados
+	app.Use(middleware.RecoverMiddleware())         // Recupera de panics
+	app.Use(middleware.RequestIDMiddleware())       // Añade ID único
+	app.Use(middleware.LoggingMiddleware())         // Logs estructurados
 	app.Use(middleware.SecurityHeadersMiddleware()) // Headers de seguridad
-	app.Use(middleware.ErrorHandlerMiddleware())  // Manejo centralizado de errores
+	app.Use(middleware.ErrorHandlerMiddleware())    // Manejo centralizado de errores
 
 	// 🚀 Redis disponible para rate limiting específico (login)
 	// NOTA: Rate limiting SOLO se aplica a endpoints específicos, no globalmente
@@ -64,7 +64,7 @@ func main() {
 		ExposeHeaders:    "Content-Length, Content-Type",
 		MaxAge:           86400, // 24 horas
 		// Permitir preflight requests
-		Next:             nil,
+		Next: nil,
 	}))
 
 	// Manejar explícitamente preflight OPTIONS requests
@@ -268,9 +268,18 @@ func main() {
 	var rentalRequestHandler *handlers.RentalRequestHandler
 	rentalRequestHandler, err = handlers.NewRentalRequestHandler()
 	if err != nil {
-		log.Printf("⚠️  Rental Request handler no disponible: %v", err)
+		log.Println("??  Rental Request handler no disponible: %v", err)
 	} else {
-		log.Println("✅ Rental Request handler inicializado")
+		log.Println("? Rental Request handler inicializado")
+	}
+
+	// Inicializar handler de Solicitudes de COMPRA (venta)
+	var purchaseRequestHandler *handlers.PurchaseRequestHandler
+	purchaseRequestHandler, err = handlers.NewPurchaseRequestHandler()
+	if err != nil {
+		log.Println("??  Purchase Request handler no disponible: %v", err)
+	} else {
+		log.Println("? Purchase Request handler inicializado")
 	}
 
 	// Rutas de salud
@@ -314,9 +323,9 @@ func main() {
 
 	// Rutas protegidas de autenticación (aplicamos middleware individualmente)
 	api.Get("/auth/me", middleware.AuthMiddleware(), authHandler.GetMe)
-	api.Put("/auth/profile", middleware.AuthMiddleware(), authHandler.UpdateProfile) // Actualizar perfil
-	api.Put("/auth/qr-pago", middleware.AuthMiddleware(), authHandler.UpdateQrPago) // QR de cobros del usuario
-	api.Put("/auth/qrs-cobro", middleware.AuthMiddleware(), authHandler.UpdateQrsCobro) // Múltiples QR por plataforma
+	api.Put("/auth/profile", middleware.AuthMiddleware(), authHandler.UpdateProfile)              // Actualizar perfil
+	api.Put("/auth/qr-pago", middleware.AuthMiddleware(), authHandler.UpdateQrPago)               // QR de cobros del usuario
+	api.Put("/auth/qrs-cobro", middleware.AuthMiddleware(), authHandler.UpdateQrsCobro)           // Múltiples QR por plataforma
 	api.Put("/auth/datos-publicos", middleware.AuthMiddleware(), authHandler.UpdateDatosPublicos) // Actualizar datos públicos
 
 	// Ruta de completar perfil de Google (protegida - requiere token)
@@ -367,6 +376,15 @@ func main() {
 	adminExclusive := api.Group("/admin")
 	adminExclusive.Use(middleware.AuthMiddleware())
 	adminExclusive.Use(middleware.AdminMiddleware()) // Solo permite admin
+
+	// Configuración global del sitio (solo admin)
+	settingsHandler, err := handlers.NewSettingsHandler()
+	if err != nil {
+		log.Printf("⚠️  Settings handler no disponible: %v", err)
+	} else {
+		adminExclusive.Put("/settings", settingsHandler.UpdateSettings)
+		api.Get("/settings/public", settingsHandler.GetPublicSettings)
+	}
 
 	// Rutas de gestión de usuarios (solo admin)
 	if userHandler != nil {
@@ -487,18 +505,18 @@ func main() {
 		// Las rutas MÁS ESPECÍFICAS deben ir ANTES que las rutas con parámetros.
 
 		// Rutas ESPECÍFICAS (protegidas) - van primero
-		api.Get("/properties/my", middleware.AuthMiddleware(), propertyHandler.GetUserProperties)         // Mis propiedades (requiere login)
-		api.Put("/properties/:id", middleware.AuthMiddleware(), propertyHandler.UpdatePropertyOwner)     // Editar propiedad (solo dueño)
+		api.Get("/properties/my", middleware.AuthMiddleware(), propertyHandler.GetUserProperties)              // Mis propiedades (requiere login)
+		api.Put("/properties/:id", middleware.AuthMiddleware(), propertyHandler.UpdatePropertyOwner)           // Editar propiedad (solo dueño)
 		api.Patch("/properties/:id/status", middleware.AuthMiddleware(), propertyHandler.UpdatePropertyStatus) // Actualizar estado (requiere login)
 
 		// Rutas PÚBLICAS (van después)
-		api.Get("/properties", propertyHandler.ListProperties)              // Listar propiedades (público)
-		api.Get("/properties/search", propertyHandler.SearchProperties)    // Búsqueda full-text (público)
-		api.Get("/properties/:id", propertyHandler.GetProperty)            // Ver detalle de propiedad (público)
+		api.Get("/properties", propertyHandler.ListProperties)          // Listar propiedades (público)
+		api.Get("/properties/search", propertyHandler.SearchProperties) // Búsqueda full-text (público)
+		api.Get("/properties/:id", propertyHandler.GetProperty)         // Ver detalle de propiedad (público)
 
 		// Rutas protegidas restantes
-		api.Post("/properties", middleware.AuthMiddleware(), middleware.SubscriptionMiddleware(), propertyHandler.CreateProperty)              // Crear propiedad (requiere login + suscripción)
-		api.Delete("/properties/:id", middleware.AuthMiddleware(), propertyHandler.DeleteProperty)        // Eliminar propiedad (requiere login)
+		api.Post("/properties", middleware.AuthMiddleware(), middleware.SubscriptionMiddleware(), propertyHandler.CreateProperty) // Crear propiedad (requiere login + suscripción)
+		api.Delete("/properties/:id", middleware.AuthMiddleware(), propertyHandler.DeleteProperty)                                // Eliminar propiedad (requiere login)
 	}
 
 	// Rutas de favoritos
@@ -549,7 +567,7 @@ func main() {
 	// Rutas de dashboard de asesores (protegidas - requieren autenticación de asesor)
 	if advisorDashboardHandler != nil {
 		advisor := api.Group("/advisor")
-		advisor.Use(middleware.AuthMiddleware())     // Requiere autenticación
+		advisor.Use(middleware.AuthMiddleware())    // Requiere autenticación
 		advisor.Use(middleware.AdvisorMiddleware()) // Requiere rol de asesor
 
 		// Obtener propiedades del asesor (con filtro opcional de estado)
@@ -565,20 +583,20 @@ func main() {
 	// Rutas de CRM (protegidas - requieren autenticación de admin o asesor)
 	if crmHandler != nil {
 		crm := api.Group("/crm")
-		crm.Use(middleware.AuthMiddleware())              // Requiere autenticación
-		crm.Use(middleware.AdminOrAdvisorMiddleware())    // Requiere rol de admin o asesor
+		crm.Use(middleware.AuthMiddleware())           // Requiere autenticación
+		crm.Use(middleware.AdminOrAdvisorMiddleware()) // Requiere rol de admin o asesor
 
 		// Clientes
-		crm.Post("/clients", crmHandler.CreateClient)                      // Crear cliente
-		crm.Get("/clients", crmHandler.ListClients)                        // Listar clientes
-		crm.Get("/clients/stats", crmHandler.GetFunnelStats)                // Estadísticas embudo
-		crm.Get("/clients/upcoming", crmHandler.GetUpcomingContacts)        // Próximos contactos
-		crm.Get("/clients/:id", crmHandler.GetClient)                       // Ver cliente
-		crm.Put("/clients/:id", crmHandler.UpdateClient)                    // Actualizar cliente
-		crm.Delete("/clients/:id", crmHandler.DeleteClient)                // Eliminar cliente
+		crm.Post("/clients", crmHandler.CreateClient)                // Crear cliente
+		crm.Get("/clients", crmHandler.ListClients)                  // Listar clientes
+		crm.Get("/clients/stats", crmHandler.GetFunnelStats)         // Estadísticas embudo
+		crm.Get("/clients/upcoming", crmHandler.GetUpcomingContacts) // Próximos contactos
+		crm.Get("/clients/:id", crmHandler.GetClient)                // Ver cliente
+		crm.Put("/clients/:id", crmHandler.UpdateClient)             // Actualizar cliente
+		crm.Delete("/clients/:id", crmHandler.DeleteClient)          // Eliminar cliente
 
 		// Interacciones
-		crm.Post("/clients/:id/interactions", crmHandler.CreateInteraction)  // Crear interacción
+		crm.Post("/clients/:id/interactions", crmHandler.CreateInteraction)    // Crear interacción
 		crm.Get("/clients/:id/interactions", crmHandler.GetClientInteractions) // Listar interacciones
 	}
 
@@ -627,9 +645,9 @@ func main() {
 
 			return c.JSON(fiber.Map{
 				"propiedades_activas": activeCount,
-				"contactos_no_leidos":  contactCount,
-				"visitas_pendientes":   visitCount,
-				"mensajes_no_leidos":   messageCount,
+				"contactos_no_leidos": contactCount,
+				"visitas_pendientes":  visitCount,
+				"mensajes_no_leidos":  messageCount,
 			})
 		})
 
@@ -642,6 +660,7 @@ func main() {
 
 		// Mensajería
 		panel.Get("/messages/conversations", messageHandler.GetConversations)
+		panel.Get("/messages/consultas", messageHandler.GetMyConsultas)
 		panel.Get("/messages/thread/:user_id", messageHandler.GetConversation)
 		panel.Post("/messages/send", messageHandler.SendMessage)
 		panel.Post("/messages/mark-read/:user_id", messageHandler.MarkMessagesAsRead)
@@ -666,6 +685,18 @@ func main() {
 		if rentalRequestHandler != nil {
 			panel.Get("/rental-requests", rentalRequestHandler.GetRentalRequests)
 		}
+
+		// Solicitudes de compra (propietario de propiedades en venta)
+		if purchaseRequestHandler != nil {
+			panel.Get("/purchase-requests", purchaseRequestHandler.GetReceivedPurchaseRequests)
+			panel.Patch("/purchase-requests/:id/accept", purchaseRequestHandler.AcceptPurchaseRequest)
+			panel.Patch("/purchase-requests/:id/reject", purchaseRequestHandler.RejectPurchaseRequest)
+			panel.Patch("/purchase-requests/:id/anular", purchaseRequestHandler.AnularVenta)
+			// Checklist documental de la venta (gestión del vendedor)
+			panel.Get("/purchase-requests/:id/documentos", purchaseRequestHandler.GetChecklistVenta)
+			panel.Patch("/purchase-requests/:id/documentos/:docId", purchaseRequestHandler.SubirDocumentoVenta)
+			panel.Post("/purchase-requests/:id/documentos/:docId/verificar", purchaseRequestHandler.VerificarDocumentoVenta)
+		}
 		if rentPaymentHandler != nil {
 			panel.Get("/tenants", rentPaymentHandler.GetPanelTenants)
 		}
@@ -689,15 +720,18 @@ func main() {
 		contracts.Use(middleware.AuthMiddleware()) // Requiere autenticación
 
 		// Contratos
-		contracts.Post("/", contractHandler.CreateContract)                  // Crear contrato
-		contracts.Get("/my", contractHandler.GetMyContracts)                 // Mis contratos
-		contracts.Get("/:id", contractHandler.GetContract)                   // Ver contrato
-		contracts.Patch("/:id", contractHandler.UpdateContract)              // Actualizar contrato
-		contracts.Get("/:id/pdf", contractHandler.GeneratePDF)               // Generar PDF
-		contracts.Post("/:id/terminate", contractHandler.TerminateContract)  // Terminar contrato + registrar devolución
+		contracts.Post("/", contractHandler.CreateContract)                 // Crear contrato
+		contracts.Get("/my", contractHandler.GetMyContracts)                // Mis contratos
+		contracts.Get("/:id", contractHandler.GetContract)                  // Ver contrato
+		contracts.Patch("/:id", contractHandler.UpdateContract)             // Actualizar contrato
+		contracts.Get("/:id/pdf", contractHandler.GeneratePDF)              // Generar PDF
+		contracts.Post("/:id/terminate", contractHandler.TerminateContract) // Terminar contrato + registrar devolución
+		contracts.Post("/:id/solicitar-fin", contractHandler.SolicitarFin)  // Inquilino: solicitar finalizar (dueño aprueba)
+		contracts.Patch("/:id/aprobar-fin", contractHandler.AprobarFin)     // Propietario: aprobar solicitud del inquilino
+		contracts.Patch("/:id/rechazar-fin", contractHandler.RechazarFin)   // Propietario: rechazar solicitud del inquilino
 
 		// Pagos de alquiler
-		contracts.Post("/:id/payments", rentPaymentHandler.RegisterPayment)   // Registrar pago
+		contracts.Post("/:id/payments", rentPaymentHandler.RegisterPayment)    // Registrar pago
 		contracts.Get("/:id/payments", rentPaymentHandler.GetContractPayments) // Pagos de un contrato
 	}
 
@@ -706,9 +740,9 @@ func main() {
 		rentPayments := api.Group("/rent-payments")
 		rentPayments.Use(middleware.AuthMiddleware()) // Requiere autenticación
 
-		rentPayments.Patch("/:id", rentPaymentHandler.UpdatePaymentStatus)       // Actualizar estado de pago
-		rentPayments.Get("/history", rentPaymentHandler.GetPaymentHistory)      // Historial de pagos
-		rentPayments.Post("/:id/comprobante", rentPaymentHandler.SubmitComprobante) // Inquilino sube comprobante de cuota
+		rentPayments.Patch("/:id", rentPaymentHandler.UpdatePaymentStatus)           // Actualizar estado de pago
+		rentPayments.Get("/history", rentPaymentHandler.GetPaymentHistory)           // Historial de pagos
+		rentPayments.Post("/:id/comprobante", rentPaymentHandler.SubmitComprobante)  // Inquilino sube comprobante de cuota
 		rentPayments.Post("/:id/confirm-receipt", rentPaymentHandler.ConfirmReceipt) // Inquilino confirma recepción de devolución
 	}
 
@@ -720,26 +754,48 @@ func main() {
 		rentalRequests := api.Group("/rental-requests")
 		rentalRequests.Use(middleware.AuthMiddleware())
 
-		rentalRequests.Get("/my", rentalRequestHandler.GetMyRentalRequests)    // Solicitudes enviadas
+		rentalRequests.Get("/my", rentalRequestHandler.GetMyRentalRequests)           // Solicitudes enviadas
 		rentalRequests.Patch("/:id/accept", rentalRequestHandler.AcceptRentalRequest) // Propietario acepta → crea contrato + cuotas
 		rentalRequests.Patch("/:id/reject", rentalRequestHandler.RejectRentalRequest) // Propietario rechaza
+	}
+
+	// Rutas de solicitudes de COMPRA (propiedades en venta)
+	if purchaseRequestHandler != nil {
+		// El comprador interesado envía su solicitud de compra
+		api.Post("/properties/:id/purchase-request", middleware.AuthMiddleware(), purchaseRequestHandler.CreatePurchaseRequest)
+
+		purchaseRequests := api.Group("/purchase-requests")
+		purchaseRequests.Use(middleware.AuthMiddleware())
+
+		purchaseRequests.Get("/my", purchaseRequestHandler.GetMyPurchaseRequests)           // Solicitudes enviadas (comprador)
+		purchaseRequests.Patch("/:id/cancel", purchaseRequestHandler.CancelPurchaseRequest) // Comprador cancela su solicitud
+		purchaseRequests.Get("/:id/minuta", purchaseRequestHandler.GetMinutaPDF)            // Minuta PDF (comprador o vendedor)
+		purchaseRequests.Get("/:id/documentos", purchaseRequestHandler.GetChecklistVenta)   // Checklist documental (lectura comprador)
+
+		// Pagos de venta: el comprador registra comprobante; el vendedor confirma
+		purchasePayments := api.Group("/purchase-payments")
+		purchasePayments.Use(middleware.AuthMiddleware())
+		purchasePayments.Patch("/:id/comprobante", purchaseRequestHandler.SubmitSalePaymentComprobante)
+		purchasePayments.Post("/:id/confirm", purchaseRequestHandler.ConfirmSalePayment)
+		purchasePayments.Patch("/:id/reject-comprobante", purchaseRequestHandler.RejectSalePaymentComprobante)
+		purchasePayments.Patch("/:id/retirar-comprobante", rentPaymentHandler.RetirarComprobanteVenta)
 	}
 
 	// Rutas de Lead Scoring (protegidas - requieren autenticación de admin o asesor)
 	if leadScoringHandler != nil {
 		crm := api.Group("/crm")
-		crm.Use(middleware.AuthMiddleware())              // Requiere autenticación
-		crm.Use(middleware.AdminOrAdvisorMiddleware())    // Requiere rol de admin o asesor
+		crm.Use(middleware.AuthMiddleware())           // Requiere autenticación
+		crm.Use(middleware.AdminOrAdvisorMiddleware()) // Requiere rol de admin o asesor
 
 		// Lead Scoring de clientes
 		crm.Get("/clients/:id/score", leadScoringHandler.GetLeadScore)                    // Obtener score de cliente
 		crm.Post("/clients/:id/score/recalculate", leadScoringHandler.CalculateLeadScore) // Recalcular score
 
 		// Lead Scoring general
-		crm.Get("/leads/scores", leadScoringHandler.GetAllLeadScores)          // Todos los scores
-		crm.Get("/leads/top", leadScoringHandler.GetTopLeads)                  // Top leads
-		crm.Get("/leads/by-level/:level", leadScoringHandler.GetLeadsByLevel)  // Leads por nivel
-		crm.Get("/leads/scores/stats", leadScoringHandler.GetScoreStats)       // Estadísticas de scoring
+		crm.Get("/leads/scores", leadScoringHandler.GetAllLeadScores)                      // Todos los scores
+		crm.Get("/leads/top", leadScoringHandler.GetTopLeads)                              // Top leads
+		crm.Get("/leads/by-level/:level", leadScoringHandler.GetLeadsByLevel)              // Leads por nivel
+		crm.Get("/leads/scores/stats", leadScoringHandler.GetScoreStats)                   // Estadísticas de scoring
 		crm.Post("/leads/scores/recalculate-all", leadScoringHandler.RecalculateAllScores) // Recalcular todos
 	}
 
@@ -774,29 +830,29 @@ func main() {
 	// 🧹 Scheduler de limpieza de imágenes (DESHABILITADO - Ahora se eliminan inmediatamente)
 	// El job está comentado porque las imágenes se eliminan automáticamente al eliminar la propiedad
 	/*
-	retentionDays := 30 // Días de retención de imágenes
-	intervalHours := 24 // Ejecutar cada 24 horas
+		retentionDays := 30 // Días de retención de imágenes
+		intervalHours := 24 // Ejecutar cada 24 horas
 
-	// Leer desde variables de entorno si existen
-	if rd := os.Getenv("IMAGE_CLEANUP_RETENTION_DAYS"); rd != "" {
-		if val, err := strconv.Atoi(rd); err == nil && val > 0 {
-			retentionDays = val
+		// Leer desde variables de entorno si existen
+		if rd := os.Getenv("IMAGE_CLEANUP_RETENTION_DAYS"); rd != "" {
+			if val, err := strconv.Atoi(rd); err == nil && val > 0 {
+				retentionDays = val
+			}
 		}
-	}
-	if ih := os.Getenv("IMAGE_CLEANUP_INTERVAL_HOURS"); ih != "" {
-		if val, err := strconv.Atoi(ih); err == nil && val > 0 {
-			intervalHours = val
+		if ih := os.Getenv("IMAGE_CLEANUP_INTERVAL_HOURS"); ih != "" {
+			if val, err := strconv.Atoi(ih); err == nil && val > 0 {
+				intervalHours = val
+			}
 		}
-	}
 
-	// Iniciar job de limpieza en background
-	cleanupJob, err := jobs.NewCleanupJob()
-	if err != nil {
-		log.Printf("⚠️  Error iniciando job de limpieza: %v\n", err)
-	} else {
-		go cleanupJob.StartCleanupScheduler(retentionDays, intervalHours)
-		log.Printf("🧹 Job de limpieza iniciado: Retención=%d días, Intervalo=%d horas\n", retentionDays, intervalHours)
-	}
+		// Iniciar job de limpieza en background
+		cleanupJob, err := jobs.NewCleanupJob()
+		if err != nil {
+			log.Printf("⚠️  Error iniciando job de limpieza: %v\n", err)
+		} else {
+			go cleanupJob.StartCleanupScheduler(retentionDays, intervalHours)
+			log.Printf("🧹 Job de limpieza iniciado: Retención=%d días, Intervalo=%d horas\n", retentionDays, intervalHours)
+		}
 	*/
 
 	// 🔍 Iniciar Worker de Búsquedas Guardadas en background

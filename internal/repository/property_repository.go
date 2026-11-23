@@ -219,6 +219,9 @@ func (r *PropertyRepository) GetByUserID(userID uint) ([]models.Property, error)
 		Preload("PropertyImages", func(db *gorm.DB) *gorm.DB {
 			return db.Order("orden ASC")
 		}).
+		Preload("Habitaciones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("id ASC")
+		}).
 		Where("user_id = ? AND deleted_at IS NULL", userID).
 		Order("created_at DESC").
 		Find(&properties).Error

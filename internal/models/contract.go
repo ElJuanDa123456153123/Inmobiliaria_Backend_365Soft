@@ -62,6 +62,14 @@ type RentalContract struct {
 	// Estado del contrato
 	Estado ContractStatus `gorm:"size:20;not null;default:'activo'" json:"estado"`
 
+	// Quién/qué finalizó el contrato: propietario | inquilino_mutuo (vacío si venció por fecha)
+	FinalizadoPor string `gorm:"size:20" json:"finalizado_por,omitempty"`
+
+	// Solicitud de finalización enviada por el inquilino (pendiente de aprobación del propietario)
+	SolicitudFinInquilino bool       `gorm:"default:false" json:"solicitud_fin_inquilino"`
+	SolicitudFinFecha     *time.Time `json:"solicitud_fin_fecha,omitempty"`
+	SolicitudFinMotivo    string     `gorm:"size:300" json:"solicitud_fin_motivo,omitempty"`
+
 	// URL del documento del contrato (PDF)
 	DocumentoURL string `gorm:"type:text" json:"documento_url"`
 }
